@@ -37,7 +37,7 @@ just stop  # Preserve the lab and its data; just up resumes it
 just down  # Delete the lab and its local test data
 ```
 
-`just up` creates one single-server NATS example. The e2e suite additionally creates two independent three-server clusters, provisions test streams from a client, blocks an upgrade on an unhealthy server, upgrades under publish load, restarts the controller, verifies acknowledged messages, and checks retained workloads. Start from a fresh local environment when rerunning the suite. Results are written to `.state/evaluation.json`. Additional memory and pinned Helm-versus-operator upgrade checks are described in [evaluation](docs/evaluation.md#reproducing-the-minor-upgrade-comparison).
+`just up` creates one single-server NATS example. On an existing lab it also applies the current CRD and restarts the controller to pick up the rebuilt local image. The e2e suite additionally creates two independent three-server clusters, provisions test streams from a client, blocks an upgrade on an unhealthy server, upgrades under publish load, restarts the controller, verifies acknowledged messages, and checks retained workloads. Start from a fresh local environment when rerunning the suite. Results are written to `.state/evaluation.json`. Additional memory and pinned Helm-versus-operator upgrade checks are described in [evaluation](docs/evaluation.md#reproducing-the-minor-upgrade-comparison).
 
 To access the single-server example from the host, forward its client Service to local port 14222 in one terminal. Read its generated token locally and use that token in your client configuration. The Secret is generated at quickstart time and stays outside Git.
 

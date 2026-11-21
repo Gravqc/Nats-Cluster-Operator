@@ -101,3 +101,16 @@ The clean comparison completed. Both trials retained all 1,500 unique payloads a
 The comparison establishes these finite recovery and message-integrity cases. It does not demonstrate a general availability or performance advantage over Helm. Retry counts include the injected failure, and one trial per approach cannot establish a statistical difference. A verified process restart may retain the same leader name.
 
 Go race tests, vet, generated CRD parity, Kubernetes admission, Helm lint, focused Python lint/format checks and three recovery-measurement regression tests passed. The original nine-case record above remains dated 2026-11-20; these are additional targeted runs. Hosted CI for this branch has not been executed.
+
+## Updating an existing lab — 2026-11-21
+
+`make local-up` was run against the existing lab after the changes. It applied
+the current CRD, replaced the controller pod despite the stable local image tag,
+and waited for the local NATS pod and resource to become Ready. The check
+confirmed the controller UID changed and the installed schema contained the
+memory policy, applied-version status and one/three-server validation.
+
+Helm does not upgrade CRDs from `crds/` during an upgrade. Kind loading a rebuilt
+image also does not replace an existing pod. The local script now handles both
+steps explicitly. This check covers resume/update of an existing installation;
+hosted CI remains unverified.

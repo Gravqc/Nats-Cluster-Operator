@@ -30,7 +30,19 @@ fi
 docker build -t nats-cluster-operator:0.1.0 .
 "$KIND" load docker-image nats-cluster-operator:0.1.0 --name nats-operator-dev
 kubectl --context kind-nats-operator-dev create namespace nats-demo --dry-run=client -o yaml | kubectl --context kind-nats-operator-dev apply -f -
+# Helm does not upgrade CRDs from its crds/ directory. Keep the disposable
+# local API in sync before applying examples that use newly added fields.
+kubectl --context kind-nats-operator-dev apply -f config/crd/bases/messaging.nats.example_natsclusters.yaml
+restart_controller=false
+if kubectl --context kind-nats-operator-dev -n nats-demo get deployment/nats-operator >/dev/null 2>&1; then
+  restart_controller=true
+fi
 helm upgrade --install nats-operator ./charts/nats-cluster-operator --kube-context kind-nats-operator-dev -n nats-demo --wait --timeout 180s
+# The local image tag is intentionally stable. Loading a rebuilt image into
+# Kind does not change an existing Deployment's pod template or running binary.
+if [[ "$restart_controller" == true ]]; then
+  kubectl --context kind-nats-operator-dev -n nats-demo rollout restart deployment/nats-operator
+fi
 if ! kubectl --context kind-nats-operator-dev -n nats-demo get secret nats-auth >/dev/null 2>&1; then
   token=$(openssl rand -hex 24)
   kubectl --context kind-nats-operator-dev -n nats-demo create secret generic nats-auth --from-literal="token=$token"

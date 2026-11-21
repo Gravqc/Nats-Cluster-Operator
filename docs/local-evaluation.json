@@ -94,5 +94,10 @@
       }
     },
     "completed": true
+  },
+  "localResume": {
+    "controller_replaced": true,
+    "current_crd_installed": true,
+    "local_ready": true
   }
 }
