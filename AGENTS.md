@@ -16,13 +16,13 @@ This is an independent personal open-source project for provisioning NATS cluste
 
 ## Changes and generated files
 
-Inspect the working tree and relevant callers before editing. Keep changes small and preserve existing user work. Read the affected tests. Change API types and validation markers first, then run make generate manifests. Keep the generated CRD and chart CRD byte-identical. Edit generated deepcopy code through its generator. API group and module names are provisional and should be changed together when a public repository is chosen.
+Inspect the working tree and relevant callers before editing. Keep changes small and preserve existing user work. Read the affected tests. Change API types and validation markers first, then run make generate manifests. Keep the generated CRD and chart CRD byte-identical. Edit generated deepcopy code through its generator. The public repository is github.com/Gravqc/Nats-Cluster-Operator. API group and module names remain provisional; any future rename must update them together and document the API migration.
 
 Use gofmt for changed Go files, then focused tests and go vet. Before a handoff involving reconciliation, storage or upgrade logic, run make test and the relevant Kind scenario. For changed Python use the local virtual environment to run ruff check --fix and ruff format. Run helm lint charts/nats-cluster-operator for chart changes, bash -n for shell changes, and git diff --check before committing. If tools are unavailable, report which check remains unverified.
 
 ## Local environment and data
 
-Use just up/status/logs/nodes/stop/down from the repo root. All Kubernetes actions must use the repository kubeconfig and explicit kind-nats-operator-dev context. Other local clusters and Docker projects may belong to the user. just stop preserves data; just down deletes the disposable lab and its storage. E2e tests require a fresh lab and write results to .state/evaluation.json. Keep the last requested running or stopped state unless the user authorizes a lifecycle change needed for a test.
+Use just up/status/logs/nodes/stop/down from the repo root. All Kubernetes actions must use the repository kubeconfig and explicit kind-nats-operator-dev context. Other local clusters and Docker projects may belong to the user. just stop preserves data; just down deletes the disposable lab and its storage. E2e tests require a fresh lab and write results to .state/evaluation.json. Memory-policy changes also run `python3 tests/memory.py` against the lab. Keep the last requested running or stopped state unless the user authorizes a lifecycle change needed for a test.
 
 Keep credentials, kubeconfigs, binaries, logs and compiler caches out of Git. Use referenced Secrets and synthetic test data. Avoid logging credentials. Changes to namespace permissions, data deletion, adoption or maintenance actions need explicit behavior and focused regression checks. Persist progress before disruptive work and derive recovery from observed state. Preserve the health gate and retained-volume behavior.
 

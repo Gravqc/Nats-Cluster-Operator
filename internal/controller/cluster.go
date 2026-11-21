@@ -75,6 +75,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	if len(secret.Data["token"]) == 0 {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "CredentialsMissing", "Credentials Secret requires a nonempty token key")
 	}
+	if spec.GoMemoryLimitPercent != nil && spec.Resources.Limits.Memory().Value() <= 0 {
+		return ctrl.Result{}, r.status(ctx, object, false, "InvalidMemoryPolicy", "goMemoryLimitPercent requires a positive container memory limit")
+	}
 	for _, desired := range Resources(object, spec) {
 		if err = r.apply(ctx, object, desired); err != nil {
 			statusErr := r.status(ctx, object, false, "ReconcileFailed", err.Error())
@@ -315,6 +318,16 @@ cluster {
 			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceStorage: disk}},
 		}}},
 	}}
+	// Each broker runs its own collector. Never flush host caches or delete
+	// JetStream files in response to memory pressure.
+	if spec.GoMemoryLimitPercent != nil {
+		limit := spec.Resources.Limits.Memory().Value()
+		bytes := limit / 100 * int64(*spec.GoMemoryLimitPercent)
+		statefulSet.Spec.Template.Spec.Containers[0].Env = append(statefulSet.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "GOMEMLIMIT", Value: fmt.Sprintf("%dB", bytes)})
+	}
+	if spec.GoGCPercent != nil {
+		statefulSet.Spec.Template.Spec.Containers[0].Env = append(statefulSet.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "GOGC", Value: fmt.Sprint(*spec.GoGCPercent)})
+	}
 	statefulSet.Spec.Template.Spec.Containers = append(statefulSet.Spec.Template.Spec.Containers, corev1.Container{
 		Name: "metrics", Image: "natsio/prometheus-nats-exporter:0.20.2",
 		Args:            []string{"-varz", "-connz", "-jsz=all", "http://localhost:8222"},

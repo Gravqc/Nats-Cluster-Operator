@@ -58,6 +58,22 @@ spec:
                   this namespace.
                 minLength: 1
                 type: string
+              goGCPercent:
+                description: |-
+                  GoGCPercent controls heap growth between collections, not physical memory
+                  utilization. A lower value trades additional CPU for a smaller heap.
+                format: int32
+                maximum: 500
+                minimum: 10
+                type: integer
+              goMemoryLimitPercent:
+                description: |-
+                  GoMemoryLimitPercent sets each NATS process GOMEMLIMIT relative to its
+                  container limit. This soft Go-runtime limit excludes Linux page cache.
+                format: int32
+                maximum: 95
+                minimum: 50
+                type: integer
               nodeSelector:
                 additionalProperties:
                   type: string
@@ -191,6 +207,16 @@ spec:
             - version
             type: object
             x-kubernetes-validations:
+            - message: Runtime memory policy is immutable.
+              rule: has(self.goMemoryLimitPercent) == has(oldSelf.goMemoryLimitPercent)
+                && (!has(self.goMemoryLimitPercent) || self.goMemoryLimitPercent ==
+                oldSelf.goMemoryLimitPercent)
+            - message: Runtime GC policy is immutable.
+              rule: has(self.goGCPercent) == has(oldSelf.goGCPercent) && (!has(self.goGCPercent)
+                || self.goGCPercent == oldSelf.goGCPercent)
+            - message: goMemoryLimitPercent requires a container memory limit.
+              rule: '!has(self.goMemoryLimitPercent) || (has(self.resources.limits)
+                && ''memory'' in self.resources.limits)'
             - message: Scaling is not supported in v0.1.
               rule: self.replicas == oldSelf.replicas
             - message: Storage resize requires a future lifecycle operation.

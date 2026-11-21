@@ -13,6 +13,7 @@ The goal is to let an engineer request an independent NATS cluster with an expli
 - Explicit NATS server versions, with no floating `latest` tag.
 - One server for local development, or three/five servers spread across workers.
 - File-backed JetStream, resource requests/limits and scheduling configuration.
+- Optional per-broker [Go memory and GC controls](docs/memory.md).
 - A token Secret supplied by the user. Same-namespace client access by default.
 - Status from `/healthz`, `/varz` and `/jsz`, including versions, connections and metadata leader.
 - Forward patch upgrades within one minor version. Before each deliberate restart, all observed replicas must be current and every pod Ready. Metadata leader is considered last. The controller waits for ten seconds of observed stability between restarts.

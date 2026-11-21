@@ -33,6 +33,8 @@ version is an exact upstream NATS server version. The operator constructs the im
 
 Every field except version is immutable after creation. Changing the Secret contents is also outside the supported rotation workflow because credentials are read into the server environment at startup.
 
+Optional `goMemoryLimitPercent` and `goGCPercent` are creation-time settings. See [memory policy](memory.md) for their meaning, limits and the difference from Linux page cache.
+
 ## Observe readiness
 
 ```sh

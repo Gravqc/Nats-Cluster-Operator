@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -176,5 +177,27 @@ func TestStandaloneConfigDoesNotWaitForClusterRoutes(t *testing.T) {
 	}
 	if objects[3].(*appsv1.StatefulSet).Spec.PodManagementPolicy != appsv1.ParallelPodManagement {
 		t.Fatal("HA startup must not wait for the first pod to form quorum alone")
+	}
+}
+
+func TestMemoryPolicyIsPerProcessAndOptIn(t *testing.T) {
+	cluster := fixture("memory")
+	env := func() map[string]string {
+		values := map[string]string{}
+		sts := Resources(cluster, cluster.Spec)[3].(*appsv1.StatefulSet)
+		for _, item := range sts.Spec.Template.Spec.Containers[0].Env {
+			values[item.Name] = item.Value
+		}
+		return values
+	}
+	if _, exists := env()["GOMEMLIMIT"]; exists {
+		t.Fatal("runtime default must remain unchanged without opt-in")
+	}
+	percent, gc := int32(80), int32(75)
+	cluster.Spec.GoMemoryLimitPercent, cluster.Spec.GoGCPercent = &percent, &gc
+	cluster.Spec.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}
+	values := env()
+	if values["GOMEMLIMIT"] != "858993440B" || values["GOGC"] != "75" {
+		t.Fatalf("incorrect process memory policy: %v", values)
 	}
 }

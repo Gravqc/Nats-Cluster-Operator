@@ -6,6 +6,9 @@ import (
 )
 
 // NatsClusterSpec describes an independent NATS cluster.
+// +kubebuilder:validation:XValidation:rule="has(self.goMemoryLimitPercent) == has(oldSelf.goMemoryLimitPercent) && (!has(self.goMemoryLimitPercent) || self.goMemoryLimitPercent == oldSelf.goMemoryLimitPercent)",message="Runtime memory policy is immutable."
+// +kubebuilder:validation:XValidation:rule="has(self.goGCPercent) == has(oldSelf.goGCPercent) && (!has(self.goGCPercent) || self.goGCPercent == oldSelf.goGCPercent)",message="Runtime GC policy is immutable."
+// +kubebuilder:validation:XValidation:rule="!has(self.goMemoryLimitPercent) || (has(self.resources.limits) && 'memory' in self.resources.limits)",message="goMemoryLimitPercent requires a container memory limit."
 // +kubebuilder:validation:XValidation:rule="self.replicas == oldSelf.replicas",message="Scaling is not supported in v0.1."
 // +kubebuilder:validation:XValidation:rule="self.storage == oldSelf.storage",message="Storage resize requires a future lifecycle operation."
 // +kubebuilder:validation:XValidation:rule="self.credentialsSecret == oldSelf.credentialsSecret",message="Changing credentials is not supported in v0.1."
@@ -15,6 +18,19 @@ import (
 // +kubebuilder:validation:XValidation:rule="has(self.tolerations) == has(oldSelf.tolerations) && (!has(self.tolerations) || self.tolerations == oldSelf.tolerations)",message="Tolerations are immutable in v0.1."
 // +kubebuilder:validation:XValidation:rule="self.version.split('.')[0] == oldSelf.version.split('.')[0] && self.version.split('.')[1] == oldSelf.version.split('.')[1] && int(self.version.split('.')[2]) >= int(oldSelf.version.split('.')[2])",message="v0.1 supports forward patch upgrades within one minor release only."
 type NatsClusterSpec struct {
+	// GoMemoryLimitPercent sets each NATS process GOMEMLIMIT relative to its
+	// container limit. This soft Go-runtime limit excludes Linux page cache.
+	// +optional
+	// +kubebuilder:validation:Minimum=50
+	// +kubebuilder:validation:Maximum=95
+	GoMemoryLimitPercent *int32 `json:"goMemoryLimitPercent,omitempty"`
+	// GoGCPercent controls heap growth between collections, not physical memory
+	// utilization. A lower value trades additional CPU for a smaller heap.
+	// +optional
+	// +kubebuilder:validation:Minimum=10
+	// +kubebuilder:validation:Maximum=500
+	GoGCPercent *int32 `json:"goGCPercent,omitempty"`
+
 	// PodMonitor creates a per-cluster Prometheus PodMonitor when its CRD is installed.
 	// +optional
 	// +kubebuilder:default=false
