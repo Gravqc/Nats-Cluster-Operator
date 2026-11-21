@@ -2,7 +2,7 @@
 
 ## Purpose and scope
 
-This is an independent personal open-source project for provisioning NATS clusters and evaluating NATS-aware maintenance on Kubernetes. Use generic examples and project references. Start with README.md, docs/scope.md and docs/design.md. The current implementation supports forward patch upgrades within one server minor version. Deferred features live in docs/operations.md and must be described as proposals until implemented and evaluated.
+This is an independent personal open-source project for provisioning NATS clusters and evaluating NATS-aware maintenance on Kubernetes. Use generic examples and project references. Start with README.md, docs/scope.md and docs/design.md. The implementation supports forward patches and adjacent-minor upgrades, with executed compatibility limited to the version pairs in docs/evaluation.md. Deferred features live in docs/operations.md and must be described as proposals until implemented and evaluated.
 
 ## Repository map
 
@@ -11,8 +11,18 @@ This is an independent personal open-source project for provisioning NATS cluste
 - cmd/main.go starts the namespace-scoped operator; cmd/probe is the e2e message-integrity client.
 - charts/nats-cluster-operator installs the controller, permissions and CRD.
 - config/crd/bases contains the generated CRD; examples contains user-facing resources.
-- scripts/local-up.sh and justfile manage the isolated Kind lab; tests/e2e.py verifies it.
+- scripts/local-up.sh and justfile manage the isolated Kind lab; tests/e2e.py verifies its initial lifecycle scenarios.
+- tests/memory.py checks process memory policy. tests/upgrade_comparison.py compares pinned Helm and operator rollouts; tests/test_upgrade_comparison.py covers recovery-measurement edge cases.
 - docs/evaluation.md and docs/local-evaluation.json record the last executed evaluation and its limits.
+
+## Feature acceptance
+
+Only add features with a concrete operational purpose and executed verification.
+A CLI command existing upstream is not sufficient justification for an automatic
+controller action. Unverified or unsuitable workflows stay documented in
+docs/operations.md, without speculative API fields. Autoscaling and host page-cache
+flushing are outside scope. Do not weaken health gates to make experiments pass.
+Record negative or inconclusive comparisons as such; never assume Helm loses data.
 
 ## Changes and generated files
 
@@ -22,7 +32,7 @@ Use gofmt for changed Go files, then focused tests and go vet. Before a handoff 
 
 ## Local environment and data
 
-Use just up/status/logs/nodes/stop/down from the repo root. All Kubernetes actions must use the repository kubeconfig and explicit kind-nats-operator-dev context. Other local clusters and Docker projects may belong to the user. just stop preserves data; just down deletes the disposable lab and its storage. E2e tests require a fresh lab and write results to .state/evaluation.json. Memory-policy changes also run `python3 tests/memory.py` against the lab. Keep the last requested running or stopped state unless the user authorizes a lifecycle change needed for a test.
+Use just up/status/logs/nodes/stop/down from the repo root. All Kubernetes actions must use the repository kubeconfig and explicit kind-nats-operator-dev context. Other local clusters and Docker projects may belong to the user. just stop preserves data; just down deletes the disposable lab and its storage. E2e tests require a fresh lab and write results to .state/evaluation.json. Upgrade changes also run `python3 tests/upgrade_comparison.py` in a lab with no previous comparison fixtures. Report sampled monitoring gaps separately from actual message integrity. Monitoring reads must have short timeouts. Recovery checks must prove the old process died and a new process became Ready; do not require a different leader name. Run `python3 -m unittest discover -s tests -p 'test_*.py'` when changing measurement logic. Memory-policy changes also run `python3 tests/memory.py` against the lab. Keep the last requested running or stopped state unless the user authorizes a lifecycle change needed for a test.
 
 Keep credentials, kubeconfigs, binaries, logs and compiler caches out of Git. Use referenced Secrets and synthetic test data. Avoid logging credentials. Changes to namespace permissions, data deletion, adoption or maintenance actions need explicit behavior and focused regression checks. Persist progress before disruptive work and derive recovery from observed state. Preserve the health gate and retained-volume behavior.
 
