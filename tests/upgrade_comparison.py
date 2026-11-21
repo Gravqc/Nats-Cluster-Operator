@@ -12,7 +12,7 @@ import subprocess
 import time
 import urllib.request
 
-from e2e import ROOT, get, job, kubectl, probe, ready, wait
+from e2e import ROOT, SEED_COUNT, get, job, kubectl, probe, ready, wait
 
 OLD = "2.11.14"
 NEW = "2.12.5"
@@ -318,10 +318,14 @@ def evaluate(name):
     REPORT.setdefault("recoverySamples", {})[name] = recovery
     job("load-" + name)
     load = json.loads(kubectl("logs", "job/load-" + name).stdout)
-    probe("verify-" + name, name, "verify", COUNT)
+    probe("verify-" + name, name, "verify", SEED_COUNT + COUNT)
     job("verify-" + name)
     verified = json.loads(kubectl("logs", "job/verify-" + name).stdout)
-    assert load["acknowledged"] == COUNT and verified["missing"] == 0
+    assert (
+        load["acknowledged"] == COUNT
+        and verified["verified"] == SEED_COUNT + COUNT
+        and verified["missing"] == 0
+    )
     no_leader = sum(
         b["at"] - a["at"]
         for a, b in zip(observations, observations[1:])

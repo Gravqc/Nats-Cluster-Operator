@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/nats-io/nats.go"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/nats-io/nats.go"
 )
+
+const seedCount = 100
 
 func main() {
 	if err := run(); err != nil {
@@ -25,7 +28,7 @@ func run() error {
 		return err
 	}
 	mode := os.Getenv("MODE")
-	if mode == "seed" || mode == "load" {
+	if mode == "seed" {
 		replicas, _ := strconv.Atoi(os.Getenv("REPLICAS"))
 		if replicas == 0 {
 			replicas = 3
@@ -34,11 +37,17 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		count := 100
+	}
+	if mode == "seed" || mode == "load" {
+		count := seedCount
+		start := 0
 		if mode == "load" {
 			count = 900
+			// Keep pre-upgrade messages out of the load publisher so the final
+			// integrity check can detect loss of those original messages.
+			start = seedCount
 		}
-		if value := os.Getenv("COUNT"); value != "" {
+		if value := os.Getenv("COUNT"); value != "" && mode == "load" {
 			count, err = strconv.Atoi(value)
 			if err != nil || count < 1 || count > 100000 {
 				return fmt.Errorf("COUNT must be between 1 and 100000")
@@ -54,7 +63,7 @@ func run() error {
 		}
 		acked := 0
 		timeouts := 0
-		for i := 0; i < count; i++ {
+		for i := start; i < start+count; i++ {
 			payload := fmt.Sprintf("%s-%d", os.Getenv("CLUSTER"), i)
 			// Retries keep one message ID, so an ambiguous acknowledgement is deduplicated.
 			var ack *nats.PubAck
@@ -84,7 +93,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	expected := 100
+	expected := seedCount
 	if value := os.Getenv("EXPECTED"); value != "" {
 		expected, _ = strconv.Atoi(value)
 	}

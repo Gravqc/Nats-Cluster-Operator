@@ -2,7 +2,7 @@
 
 The scripted evaluation runs only against `kind-nats-operator-dev` using a repository-local kubeconfig. Runtime results are written to `.state/evaluation.json`. The clean local run completed on 2026-11-20 using Kubebuilder v4.6.0, Go 1.24.9, Kubernetes v1.35.8 in Kind v0.33.0, and NATS 2.15.2 to 2.15.3.
 
-All nine e2e checks passed. The upgraded cluster retained all 900 unique test messages, and the independent control cluster retained all 100. The concurrent publisher received 900 acknowledgements with zero retry errors in this run. At most one server was unavailable during the rollout. Runtime pause of a NATS task was verified before testing the blocked upgrade. The operator was restarted during reconciliation, then completed the rollout. Pod recovery and retained-workload deletion checks preserved the same payloads.
+All nine e2e checks passed. The final reads verified 900 unique messages on the upgraded cluster and all 100 seed messages on the independent control cluster. The upgrade load replayed the first 100 IDs, so that run verified final contents rather than preservation of the original seed messages without replay. The concurrent publisher received 900 acknowledgements with zero retry errors in this run. At most one server was unavailable during the rollout. Runtime pause of a NATS task was verified before testing the blocked upgrade. The operator was restarted during reconciliation, then completed the rollout. Pod recovery and retained-workload deletion checks preserved the same payloads.
 
 Go unit/race tests, go vet, generated schema equality, Helm lint, API-server validation of install manifests, and focused Python lint/format checks also passed. GitHub Actions workflows are defined; the initial commit has been pushed to the public repository; hosted CI results are tracked separately from local evidence.
 
@@ -55,9 +55,10 @@ at approximately ten messages per second. Each trial then kills the confirmed
 metadata-leader process through the Kind container runtime while publishing
 continues. Kubernetes/NATS recovery is measured separately from rollout time. The test verifies that the original container exited with code 137 and a new container became Ready. A fast restart can recover with the same metadata leader; a change in leader name is recorded, not required.
 
-Each publisher uses stable message IDs on retry and sends 1,500 IDs, including
-the 100 pre-seeded IDs. After both events, a client checks the final unique count
-and every payload by sequence. Retry errors cover the **combined rollout and
+The current comparison seeds 100 payloads before the upgrade, then sends 1,500
+new IDs during the trial. Retries reuse the ID of the message being sent. After
+both events, the verifier checks all 1,600 payloads by sequence. The patch suite
+uses the same separation with 900 new IDs and expects 1,000 total payloads. Retry errors cover the **combined rollout and
 hard-failure trial**, not the rollout alone. They include retryable request
 errors, not only terminal message failures.
 
@@ -84,7 +85,7 @@ claimed by this record.
 
 ## Minor-upgrade results — 2026-11-21
 
-The clean comparison completed. Both trials retained all 1,500 unique payloads after the rollout and a verified metadata-leader process kill.
+At commit `9cdb28b`, both local trials verified 1,500 unique payloads at the end of the rollout and a verified metadata-leader process kill. That probe replayed the 100 seed IDs during load. The recorded counts establish final contents, and do not independently prove that the original seed messages survived without replay.
 
 | Measurement | Official Helm chart | Operator |
 | --- | ---: | ---: |
@@ -100,7 +101,7 @@ The clean comparison completed. Both trials retained all 1,500 unique payloads a
 
 The comparison establishes these finite recovery and message-integrity cases. It does not demonstrate a general availability or performance advantage over Helm. Retry counts include the injected failure, and one trial per approach cannot establish a statistical difference. A verified process restart may retain the same leader name.
 
-Go race tests, vet, generated CRD parity, Kubernetes admission, Helm lint, focused Python lint/format checks and three recovery-measurement regression tests passed. The original nine-case record above remains dated 2026-11-20; these are additional targeted runs. Hosted CI for this branch has not been executed.
+Go race tests, vet, generated CRD parity, Kubernetes admission, Helm lint, focused Python lint/format checks and three recovery-measurement regression tests passed. The original nine-case record above remains dated 2026-11-20; these are additional targeted runs. The [hosted branch run](https://github.com/Gravqc/Nats-Cluster-Operator/actions/runs/44881286843) passed the full suite at the same commit. The [main run](https://github.com/Gravqc/Nats-Cluster-Operator/actions/runs/44882506084) failed in quickstart because its readiness check ran before the broker pod existed.
 
 ## Updating an existing lab — 2026-11-21
 
@@ -113,4 +114,4 @@ memory policy, applied-version status and one/three-server validation.
 Helm does not upgrade CRDs from `crds/` during an upgrade. Kind loading a rebuilt
 image also does not replace an existing pod. The local script now handles both
 steps explicitly. This check covers resume/update of an existing installation;
-hosted CI remains unverified.
+the hosted runs above cover fresh installation.

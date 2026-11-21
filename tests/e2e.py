@@ -10,6 +10,8 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 os.environ["KUBECONFIG"] = str(ROOT / ".state/kubeconfig")
 KUBE = ["kubectl", "--context", "kind-nats-operator-dev", "-n", "nats-demo"]
+SEED_COUNT = 100
+PATCH_LOAD_COUNT = 900
 REPORT = {"cluster": "nats-operator-dev", "checks": {}}
 
 
@@ -70,7 +72,7 @@ def cluster(name):
     wait(lambda: ready(name), "waiting for " + name)
 
 
-def probe(name, cluster_name, mode, expected=100, count=None):
+def probe(name, cluster_name, mode, expected=SEED_COUNT, count=None):
     env = [
         {"name": key, "value": value}
         for key, value in {
@@ -234,7 +236,7 @@ def run():
             raise RuntimeError("Health gate did not report blocked status")
         record("upgrade_blocked_while_server_unhealthy")
         # Prepare traffic while the gate is blocked; the existing stream remains.
-        probe("load-upgrade", "platform", "load")
+        probe("load-upgrade", "platform", "load", count=PATCH_LOAD_COUNT)
     finally:
         set_server_paused(False)
     # Restart the operator during reconciliation. Progress must come from real pods.
@@ -271,7 +273,7 @@ def run():
         if server["version"] != "2.15.3":
             raise RuntimeError("Status did not observe upgraded server version")
     record("rolling_patch_upgrade_resumes_after_operator_restart")
-    probe("verify-platform", "platform", "verify", 900)
+    probe("verify-platform", "platform", "verify", SEED_COUNT + PATCH_LOAD_COUNT)
     job("verify-platform")
     probe("verify-other", "other", "verify", 100)
     job("verify-other")
@@ -291,7 +293,7 @@ def run():
         "waiting for replacement pod readiness",
     )
     wait(lambda: ready("platform"), "waiting for pod recovery")
-    probe("verify-recovery", "platform", "verify", 900)
+    probe("verify-recovery", "platform", "verify", SEED_COUNT + PATCH_LOAD_COUNT)
     job("verify-recovery")
     record("pod_recovery_preserves_messages")
     kubectl("delete", "natscluster/other", "--wait=true", "--timeout=60s")

@@ -75,7 +75,7 @@ make generate manifests test
 make image
 ```
 
-`make generate manifests` uses controller-gen v0.18.0. Generated API deepcopy code and the CRD are checked in. `PROJECT` records the Kubebuilder scaffold. The runtime image is built from scratch and runs without root privileges. CI is configured for formatting, generation drift, unit/race checks, Helm lint and the Kind evaluation. Hosted CI execution is pending publication.
+`make generate manifests` uses controller-gen v0.18.0. Generated API deepcopy code and the CRD are checked in. `PROJECT` records the Kubebuilder scaffold. The runtime image is built from scratch and runs without root privileges. CI is configured for formatting, generation drift, unit/race checks, Helm lint and the Kind evaluation. The [hosted Kind run](https://github.com/Gravqc/Nats-Cluster-Operator/actions/runs/44881286843) completed the unit and integration suites. See the [evaluation record](docs/evaluation.md) for the startup failure reproduced on main and the limits of the integrity checks.
 
 ## Adoption and publication
 
