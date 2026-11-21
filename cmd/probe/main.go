@@ -38,6 +38,20 @@ func run() error {
 		if mode == "load" {
 			count = 900
 		}
+		if value := os.Getenv("COUNT"); value != "" {
+			count, err = strconv.Atoi(value)
+			if err != nil || count < 1 || count > 100000 {
+				return fmt.Errorf("COUNT must be between 1 and 100000")
+			}
+		}
+		interval := 100 * time.Millisecond
+		if value := os.Getenv("INTERVAL_MS"); value != "" {
+			millis, parseErr := strconv.Atoi(value)
+			if parseErr != nil || millis < 1 || millis > 1000 {
+				return fmt.Errorf("INTERVAL_MS must be between 1 and 1000")
+			}
+			interval = time.Duration(millis) * time.Millisecond
+		}
 		acked := 0
 		timeouts := 0
 		for i := 0; i < count; i++ {
@@ -60,7 +74,7 @@ func run() error {
 			}
 			acked++
 			if mode == "load" {
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(interval)
 			}
 		}
 		fmt.Printf("{\"acknowledged\":%d,\"retry_errors\":%d}\n", acked, timeouts)

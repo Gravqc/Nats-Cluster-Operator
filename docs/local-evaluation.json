@@ -45,5 +45,54 @@
       "cluster": "other"
     }
   },
-  "maxUnavailableDuringUpgrade": 1
+  "maxUnavailableDuringUpgrade": 1,
+  "initialEvaluationDate": "2026-11-20",
+  "additionalEvaluationDate": "2026-11-21",
+  "memoryPolicy": {
+    "passed": true,
+    "goMemoryLimitPercent": 80,
+    "containerMemoryLimit": "512Mi",
+    "observedGoMemoryLimitBytes": 429496720,
+    "goGCPercent": 75,
+    "missingMemoryLimitRejected": true
+  },
+  "upgradeComparison": {
+    "from": "2.11.14",
+    "to": "2.12.5",
+    "chart": "nats-2.12.5",
+    "chartSHA256": "c4beac684b5ffc2cd021e487925788ce3abb941f84062ae6953d927bd0095261",
+    "unverified_five_server_topology_rejected": true,
+    "rapid_minor_skip_rejected": true,
+    "results": {
+      "eval-helm": {
+        "meta_leader_failure_recovery_seconds": 5.034617833000084,
+        "failed_process_ready_seconds": 15.010749291999673,
+        "leader_changed_after_failure": true,
+        "hard_kill_confirmed": true,
+        "acknowledged": 1500,
+        "publish_retry_errors": 6,
+        "verified_unique": 1500,
+        "missing": 0,
+        "rollout_seconds": 46.9926230830024,
+        "sampled_no_confirmed_meta_leader_seconds": 0,
+        "observed_meta_leader_changes": 1,
+        "max_unavailable": 1
+      },
+      "eval-operator": {
+        "meta_leader_failure_recovery_seconds": 4.879054500001075,
+        "failed_process_ready_seconds": 4.879054500001075,
+        "leader_changed_after_failure": true,
+        "hard_kill_confirmed": true,
+        "acknowledged": 1500,
+        "publish_retry_errors": 11,
+        "verified_unique": 1500,
+        "missing": 0,
+        "rollout_seconds": 51.982196249999106,
+        "sampled_no_confirmed_meta_leader_seconds": 0,
+        "observed_meta_leader_changes": 1,
+        "max_unavailable": 1
+      }
+    },
+    "completed": true
+  }
 }

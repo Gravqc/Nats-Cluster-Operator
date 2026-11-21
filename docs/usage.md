@@ -27,9 +27,9 @@ spec:
   podMonitor: false
 ```
 
-Use the storage class available in your cluster. Omit storageClassName to use its default. The Secret must exist in the same namespace and contain a nonempty token key. Set replicas to one for a local standalone instance, or three/five for the supported cluster shapes. Three/five-server clusters require separate eligible workers for their pods. The optional nodeSelector and tolerations fields use Kubernetes pod scheduling syntax.
+Use the storage class available in your cluster. Omit storageClassName to use its default. The Secret must exist in the same namespace and contain a nonempty token key. Set replicas to one for a local standalone instance, or three for a replicated cluster. Three-server clusters require separate eligible workers for their pods. The optional nodeSelector and tolerations fields use Kubernetes pod scheduling syntax.
 
-version is an exact upstream NATS server version. The operator constructs the image tag nats:<version>-alpine. storage is the persistent claim size requested for each server. resources applies to the NATS container. The operator also adds a pinned metrics exporter with its own small resource requests. podMonitor requires the upstream monitoring CRD before creation. Configure Prometheus to select the emitted monitor.
+version is an exact upstream NATS server version. The operator constructs the image tag nats:<version>-alpine. storage is the persistent claim size requested for each server. A PVC request is not a portable filesystem quota; the storage provider determines enforcement. Stream retention and capacity planning remain necessary. resources applies to the NATS container. The operator also adds a pinned metrics exporter with its own small resource requests. podMonitor requires the upstream monitoring CRD before creation. Configure Prometheus to select the emitted monitor.
 
 Every field except version is immutable after creation. Changing the Secret contents is also outside the supported rotation workflow because credentials are read into the server environment at startup.
 
@@ -60,7 +60,7 @@ export NATS_URL="nats://127.0.0.1:14222"
 
 Supply NATS_URL and NATS_TOKEN through your client's connection options. The token variable is local to this shell. Keep its value out of issue reports and committed configuration. The operator exposes the client port inside Kubernetes; the host connection uses the explicit port-forward.
 
-## Patch upgrade
+## Guarded upgrade
 
 Create a separate HA example using version 2.15.2, wait until Ready, then request 2.15.3:
 
@@ -70,7 +70,9 @@ kubectl --context kind-nats-operator-dev -n nats-demo patch natscluster/platform
 kubectl --context kind-nats-operator-dev -n nats-demo get natscluster/platform -w
 ```
 
-Use status.observedGeneration together with the Ready condition when observing a spec change; an immediately returned Ready condition can belong to the previous generation. The e2e script performs this check. Patch upgrades can wait indefinitely while replica health is uncertain. A single-server upgrade interrupts service during its restart. The controller uses OnDelete StatefulSets and coordinates individual replacement pods. Read design.md for the gate, persistence and failure model.
+Forward patches and adjacent-minor upgrades are accepted. Downgrades, skipped minors, and overlapping version requests are rejected. The executed compatibility record covers specific version pairs, not all 2.x combinations. Check upstream release notes before selecting versions. `status.upgradeVersion` identifies an active request. There is no cancel, downgrade or forced-health override API. A missing image or an incompatible release can leave a request blocked and require administrator recovery; verify the exact image and upstream upgrade prerequisites before requesting a rollout.
+
+Use status.observedGeneration together with the Ready condition when observing a spec change; an immediately returned Ready condition can belong to the previous generation. The e2e script performs this check. Upgrades can wait indefinitely while replica health is uncertain. A single-server upgrade interrupts service during its restart. The controller uses OnDelete StatefulSets and coordinates individual replacement pods. Read design.md for the gate, persistence and failure model.
 
 ## Stop, resume and remove
 

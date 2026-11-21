@@ -29,10 +29,75 @@ On 2026-11-20 the existing lab was resumed with just up, its local NATS pod reac
 
 ## Limits
 
-Kind shares one Docker host. These tests cannot establish physical host/AZ resilience, EBS behavior, production throughput, internet security, or loss protection beyond the tested replicas. The default Kind CNI does not enforce NetworkPolicy. TLS, backups, credential rotation, persistent consumer failover, large monitoring payloads, minor upgrades, autoscaling, client rebalancing and in-place Helm adoption require additional work. The test suite checks a finite set of acknowledged messages; it is not a proof of losslessness for every failure timing.
+Kind shares one Docker host. These tests cannot establish physical host/AZ resilience, EBS behavior, production throughput, internet security, or loss protection beyond the tested replicas. This suite does not certify every NetworkPolicy path; monitoring measurements use pod-local reads rather than assuming API-server proxy access. TLS, backups, credential rotation, persistent consumer failover, large monitoring payloads, other minor-version pairs, autoscaling, client rebalancing and in-place Helm adoption require additional work. The test suite checks a finite set of acknowledged messages; it is not a proof of losslessness for every failure timing.
 
 PodMonitor is opt-in and requires an external CRD. The local test installs the pinned upstream PodMonitor CRD v0.80.1 and verifies the emitted object and its cluster selector. Real Prometheus scraping/selection must be verified with a real Prometheus Operator installation.
 
 ## Memory policy — 2026-11-21
 
 `python3 tests/memory.py` passed against the resumed Kind lab. A real NATS 2.15.3 process reported `gomemlimit=429496720` for a 512Mi container with an 80% policy, and received `GOGC=75`. Kubernetes rejected the policy without a memory limit. Resource-generation regression tests verify opt-in behavior. This validates configuration delivery, not throughput, memory-pressure performance or OOM prevention.
+
+## Reproducing the minor-upgrade comparison
+
+From a fresh lab after `just up`, run:
+
+```sh
+python3 tests/memory.py
+python3 tests/upgrade_comparison.py
+```
+
+The comparison downloads the official NATS chart **2.12.5**, verifies its SHA-256
+before use, and creates separate `eval-helm` and `eval-operator`
+fixtures. Both start with three NATS **2.11.14** servers on separate workers,
+1Gi claims, the same NATS CPU/memory requests and limits, and an application-created
+file-backed R3 stream. Both upgrade to **2.12.5** under acknowledged publishing
+at approximately ten messages per second. Each trial then kills the confirmed
+metadata-leader process through the Kind container runtime while publishing
+continues. Kubernetes/NATS recovery is measured separately from rollout time. The test verifies that the original container exited with code 137 and a new container became Ready. A fast restart can recover with the same metadata leader; a change in leader name is recorded, not required.
+
+Each publisher uses stable message IDs on retry and sends 1,500 IDs, including
+the 100 pre-seeded IDs. After both events, a client checks the final unique count
+and every payload by sequence. Retry errors cover the **combined rollout and
+hard-failure trial**, not the rollout alone. They include retryable request
+errors, not only terminal message failures.
+
+Monitoring samples read `/jsz` through bounded, pod-local `kubectl exec` calls.
+The API-server proxy path timed out for the operator pods during an exploratory
+attempt, so it is not used as evidence of leader absence. The script checks its
+monitoring path before load and requires a fresh leader observation before
+injecting the next failure. It records partial results and an error if a run
+fails; a complete run sets `completed=true` in `.state/upgrade-comparison.json`.
+
+The reported no-confirmed-leader duration is estimated from polling intervals.
+Zero means no absence was sampled. Leader-change counts compare consecutive
+successful samples and can miss changes during gaps. These are not continuous
+Raft traces. The official chart keeps its readiness/lifecycle behavior; the
+operator has its own stricter replica gate and exporter sidecar. Trials run
+sequentially on one Docker host. This is a reproducible functional comparison,
+not a statistical benchmark or proof that either deployment method loses data.
+
+Admission checks also verify that overlapping requests and skipped minors
+relative to the last healthy version are rejected. Five-server creation is
+rejected until that topology is evaluated. No connection redistribution, leader
+balancing, five-server scale cycle or metrics-driven scaling experiment is
+claimed by this record.
+
+## Minor-upgrade results — 2026-11-21
+
+The clean comparison completed. Both trials retained all 1,500 unique payloads after the rollout and a verified metadata-leader process kill.
+
+| Measurement | Official Helm chart | Operator |
+| --- | ---: | ---: |
+| Verified unique messages | 1500 | 1500 |
+| Missing messages | 0 | 0 |
+| Publisher retry errors across both events | 6 | 11 |
+| Maximum unavailable during rollout | 1 | 1 |
+| Observed leader changes during rollout | 1 | 1 |
+| Rollout seconds | 46.99 | 51.98 |
+| Sampled seconds without a confirmed leader during rollout | 0.00 | 0.00 |
+| Confirmed leader after hard kill, seconds | 5.03 | 4.88 |
+| Replacement process Ready, seconds | 15.01 | 4.88 |
+
+The comparison establishes these finite recovery and message-integrity cases. It does not demonstrate a general availability or performance advantage over Helm. Retry counts include the injected failure, and one trial per approach cannot establish a statistical difference. A verified process restart may retain the same leader name.
+
+Go race tests, vet, generated CRD parity, Kubernetes admission, Helm lint, focused Python lint/format checks and three recovery-measurement regression tests passed. The original nine-case record above remains dated 2026-11-20; these are additional targeted runs. Hosted CI for this branch has not been executed.

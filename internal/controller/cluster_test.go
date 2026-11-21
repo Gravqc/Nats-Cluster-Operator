@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -199,5 +200,59 @@ func TestMemoryPolicyIsPerProcessAndOptIn(t *testing.T) {
 	values := env()
 	if values["GOMEMLIMIT"] != "858993440B" || values["GOGC"] != "75" {
 		t.Fatalf("incorrect process memory policy: %v", values)
+	}
+}
+
+func TestUpgradeRestartsCurrentMetaLeaderLast(t *testing.T) {
+	pods := []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "a-0"}}, {ObjectMeta: metav1.ObjectMeta{Name: "a-2"}}, {ObjectMeta: metav1.ObjectMeta{Name: "a-1"}}}
+	orderUpgrade(pods, "a-2")
+	if pods[0].Name != "a-1" || pods[1].Name != "a-0" || pods[2].Name != "a-2" {
+		t.Fatalf("unsafe restart order: %v", pods)
+	}
+}
+
+func TestUpgradeCompatibility(t *testing.T) {
+	for _, pair := range [][2]string{{"2.11.14", "2.12.5"}, {"2.12.4", "2.12.5"}} {
+		if !forwardUpgrade(pair[0], pair[1]) {
+			t.Fatal(pair)
+		}
+	}
+	for _, pair := range [][2]string{{"2.11.14", "2.13.0"}, {"2.12.5", "2.11.14"}, {"2.12.5", "2.12.4"}, {"2.12.5", "3.0.0"}, {"invalid", "2.12.5"}} {
+		if forwardUpgrade(pair[0], pair[1]) {
+			t.Fatal(pair)
+		}
+	}
+}
+
+func TestUpgradeIntentPersistsBeforeStatefulSetChanges(t *testing.T) {
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{natsv1.AddToScheme, appsv1.AddToScheme, corev1.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cluster := fixture("upgrade")
+	old := Resources(cluster, cluster.Spec)[3].(*appsv1.StatefulSet)
+	old.Spec.Template.Spec.Containers[0].Image = "nats:2.14.6-alpine"
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "auth", Namespace: "test"}, Data: map[string][]byte{"token": []byte("test-token")}}
+	store := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&natsv1.NatsCluster{}).WithObjects(cluster, old, secret).Build()
+	r := &Reconciler{Client: store}
+	key := client.ObjectKeyFromObject(cluster)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	current := &natsv1.NatsCluster{}
+	if err := store.Get(context.Background(), key, current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Status.UpgradeVersion != "2.15.3" {
+		t.Fatal("rollout intent was not persisted")
+	}
+	sts := &appsv1.StatefulSet{}
+	if err := store.Get(context.Background(), key, sts); err != nil {
+		t.Fatal(err)
+	}
+	if sts.Spec.Template.Spec.Containers[0].Image != "nats:2.14.6-alpine" {
+		t.Fatal("template changed before intent was durable")
 	}
 }

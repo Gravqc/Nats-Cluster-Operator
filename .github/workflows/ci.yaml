@@ -18,10 +18,12 @@ jobs:
       - run: helm lint charts/nats-cluster-operator
       - run: |
           python3 -m pip install ruff==0.11.13
-          ruff check tests/e2e.py
-          ruff format --check tests/e2e.py
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          ruff check tests/e2e.py tests/memory.py tests/upgrade_comparison.py tests/test_upgrade_comparison.py
+          ruff format --check tests/e2e.py tests/memory.py tests/upgrade_comparison.py tests/test_upgrade_comparison.py
   kind:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4.3.0
@@ -33,10 +35,14 @@ jobs:
           sudo mv kind /usr/local/bin/kind
       - run: make local-up
       - run: python3 tests/e2e.py
+      - run: python3 tests/memory.py
+      - run: python3 tests/upgrade_comparison.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: evaluation
-          path: .state/evaluation.json
+          path: |
+            .state/evaluation.json
+            .state/upgrade-comparison.json
       - run: make local-down
         if: always()

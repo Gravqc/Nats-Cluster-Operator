@@ -70,7 +70,7 @@ def cluster(name):
     wait(lambda: ready(name), "waiting for " + name)
 
 
-def probe(name, cluster_name, mode, expected=100):
+def probe(name, cluster_name, mode, expected=100, count=None):
     env = [
         {"name": key, "value": value}
         for key, value in {
@@ -81,6 +81,8 @@ def probe(name, cluster_name, mode, expected=100):
             "REPLICAS": "3",
         }.items()
     ]
+    if count is not None:
+        env.append({"name": "COUNT", "value": str(count)})
     env.append(
         {
             "name": "NATS_TOKEN",
@@ -93,7 +95,7 @@ def probe(name, cluster_name, mode, expected=100):
         "metadata": {"name": name},
         "spec": {
             "backoffLimit": 0,
-            "activeDeadlineSeconds": 360,
+            "activeDeadlineSeconds": 600,
             "template": {
                 "spec": {
                     "restartPolicy": "Never",
@@ -300,10 +302,13 @@ def run():
     record("cluster_deletion_retains_running_workload_and_data")
 
 
-try:
-    run()
-except Exception as error:
-    REPORT["error"] = str(error)
-    raise
-finally:
-    (ROOT / ".state/evaluation.json").write_text(json.dumps(REPORT, indent=2) + "\n")
+if __name__ == "__main__":
+    try:
+        run()
+    except Exception as error:
+        REPORT["error"] = str(error)
+        raise
+    finally:
+        (ROOT / ".state/evaluation.json").write_text(
+            json.dumps(REPORT, indent=2) + "\n"
+        )

@@ -16,7 +16,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="has(self.storageClassName) == has(oldSelf.storageClassName) && (!has(self.storageClassName) || self.storageClassName == oldSelf.storageClassName)",message="Storage class is immutable."
 // +kubebuilder:validation:XValidation:rule="has(self.nodeSelector) == has(oldSelf.nodeSelector) && (!has(self.nodeSelector) || self.nodeSelector == oldSelf.nodeSelector)",message="Node placement is immutable in v0.1."
 // +kubebuilder:validation:XValidation:rule="has(self.tolerations) == has(oldSelf.tolerations) && (!has(self.tolerations) || self.tolerations == oldSelf.tolerations)",message="Tolerations are immutable in v0.1."
-// +kubebuilder:validation:XValidation:rule="self.version.split('.')[0] == oldSelf.version.split('.')[0] && self.version.split('.')[1] == oldSelf.version.split('.')[1] && int(self.version.split('.')[2]) >= int(oldSelf.version.split('.')[2])",message="v0.1 supports forward patch upgrades within one minor release only."
+// +kubebuilder:validation:XValidation:rule="self.version.split('.')[0] == oldSelf.version.split('.')[0] && ((self.version.split('.')[1] == oldSelf.version.split('.')[1] && int(self.version.split('.')[2]) >= int(oldSelf.version.split('.')[2])) || int(self.version.split('.')[1]) == int(oldSelf.version.split('.')[1]) + 1)",message="Only forward patch or adjacent-minor upgrades are supported."
 type NatsClusterSpec struct {
 	// GoMemoryLimitPercent sets each NATS process GOMEMLIMIT relative to its
 	// container limit. This soft Go-runtime limit excludes Linux page cache.
@@ -39,7 +39,7 @@ type NatsClusterSpec struct {
 	// Version pins an exact upstream nats-server image tag.
 	// +kubebuilder:validation:Pattern=`^2\.[0-9]+\.[0-9]+$`
 	Version string `json:"version"`
-	// +kubebuilder:validation:Enum=1;3;5
+	// +kubebuilder:validation:Enum=1;3
 	Replicas int32 `json:"replicas"`
 	// CredentialsSecret must contain a nonempty token key in this namespace.
 	// +kubebuilder:validation:MinLength=1
@@ -64,6 +64,12 @@ type ServerStatus struct {
 }
 
 type NatsClusterStatus struct {
+	// AppliedVersion is the last target observed healthy on every server.
+	AppliedVersion string `json:"appliedVersion,omitempty"`
+
+	// UpgradeVersion pins an in-progress target across controller restarts.
+	UpgradeVersion string `json:"upgradeVersion,omitempty"`
+
 	Servers            []ServerStatus `json:"servers,omitempty"`
 	MetaLeader         string         `json:"metaLeader,omitempty"`
 	HealthySince       *metav1.Time   `json:"healthySince,omitempty"`
@@ -82,6 +88,8 @@ type NatsClusterStatus struct {
 // +kubebuilder:printcolumn:name="Servers",type=integer,JSONPath=`.spec.replicas`
 // +kubebuilder:printcolumn:name="URL",type=string,JSONPath=`.status.clientURL`
 // +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 40",message="Cluster name must contain at most 40 characters."
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.status) || !has(oldSelf.status.upgradeVersion) || self.spec.version == oldSelf.spec.version",message="Wait for the current upgrade to finish before changing version again."
+// +kubebuilder:validation:XValidation:rule="self.spec.version == oldSelf.spec.version || !has(oldSelf.status) || !has(oldSelf.status.appliedVersion) || int(self.spec.version.split('.')[1]) <= int(oldSelf.status.appliedVersion.split('.')[1]) + 1",message="Do not skip a minor relative to the last healthy server version."
 // NatsCluster provisions NATS servers. Application code owns stream policy.
 type NatsCluster struct {
 	metav1.TypeMeta   `json:",inline"`

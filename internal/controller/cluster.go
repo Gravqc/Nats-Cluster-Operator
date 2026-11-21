@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -78,6 +77,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	if spec.GoMemoryLimitPercent != nil && spec.Resources.Limits.Memory().Value() <= 0 {
 		return ctrl.Result{}, r.status(ctx, object, false, "InvalidMemoryPolicy", "goMemoryLimitPercent requires a positive container memory limit")
 	}
+	// Freeze the version request until the current rollout finishes. Updating the
+	// StatefulSet again could otherwise let a failed pod skip a server minor.
+	if object.Status.UpgradeVersion != "" && object.Status.UpgradeVersion != spec.Version {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "UpgradeTargetChanged", "The persisted rollout target differs from the request; administrator intervention is required")
+	}
+	existing := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, request.NamespacedName, existing); err == nil {
+		oldImage := existing.Spec.Template.Spec.Containers[0].Image
+		newImage := "nats:" + spec.Version + "-alpine"
+		if oldImage != newImage && object.Status.UpgradeVersion == "" {
+			if !forwardUpgrade(strings.TrimSuffix(strings.TrimPrefix(oldImage, "nats:"), "-alpine"), spec.Version) {
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "UnsupportedUpgrade", "The running StatefulSet must upgrade forward by at most one server minor")
+			}
+			object.Status.UpgradeVersion = spec.Version
+			return ctrl.Result{RequeueAfter: time.Second}, r.status(ctx, object, false, "UpgradePlanned", "Pinned the target before updating the StatefulSet")
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
 	for _, desired := range Resources(object, spec) {
 		if err = r.apply(ctx, object, desired); err != nil {
 			statusErr := r.status(ctx, object, false, "ReconcileFailed", err.Error())
@@ -120,21 +138,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, r.status(ctx, object, false, "WaitingForPod", "Waiting for the requested pod count")
 	}
 	if len(outdated) == 0 {
+		object.Status.AppliedVersion = spec.Version
+		object.Status.UpgradeVersion = ""
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, true, "Healthy", "Monitoring endpoints report healthy servers and replicas; application code owns stream policy")
 	}
 	// A health observation must survive across reconciles before a deliberate restart.
 	if time.Since(object.Status.HealthySince.Time) < 10*time.Second {
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, r.status(ctx, object, false, "Stabilizing", "Waiting for ten seconds of observed health before restarting one server")
 	}
-	sort.Slice(outdated, func(i, j int) bool {
-		if outdated[i].Name == object.Status.MetaLeader {
-			return false
-		}
-		if outdated[j].Name == object.Status.MetaLeader {
-			return true
-		}
-		return outdated[i].Name > outdated[j].Name
-	})
+	if object.Status.UpgradeVersion == "" {
+		object.Status.UpgradeVersion = spec.Version
+		return ctrl.Result{RequeueAfter: time.Second}, r.status(ctx, object, false, "UpgradePlanned", "Pinned the rollout target before restarting any server")
+	}
+	orderUpgrade(outdated, object.Status.MetaLeader)
 	target := outdated[0]
 	object.Status.HealthySince = nil
 	object.Status.LastRestartedPod = target.Name
