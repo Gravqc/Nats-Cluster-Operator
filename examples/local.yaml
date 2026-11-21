@@ -1,0 +1,12 @@
+apiVersion: messaging.nats.example/v1alpha1
+kind: NatsCluster
+metadata:
+  name: local
+spec:
+  version: "2.15.3"
+  replicas: 1
+  credentialsSecret: nats-auth
+  storage: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}

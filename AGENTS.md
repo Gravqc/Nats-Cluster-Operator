@@ -1,0 +1,31 @@
+# Working in this repository
+
+## Purpose and scope
+
+This is an independent personal open-source project for provisioning NATS clusters and evaluating NATS-aware maintenance on Kubernetes. Use generic examples and project references. Start with README.md, docs/scope.md and docs/design.md. The current implementation supports forward patch upgrades within one server minor version. Deferred features live in docs/operations.md and must be described as proposals until implemented and evaluated.
+
+## Repository map
+
+- api/v1alpha1 contains the API types and Kubebuilder validation markers.
+- internal/controller contains reconciliation, resource generation, monitoring gates and unit tests.
+- cmd/main.go starts the namespace-scoped operator; cmd/probe is the e2e message-integrity client.
+- charts/nats-cluster-operator installs the controller, permissions and CRD.
+- config/crd/bases contains the generated CRD; examples contains user-facing resources.
+- scripts/local-up.sh and justfile manage the isolated Kind lab; tests/e2e.py verifies it.
+- docs/evaluation.md and docs/local-evaluation.json record the last executed evaluation and its limits.
+
+## Changes and generated files
+
+Inspect the working tree and relevant callers before editing. Keep changes small and preserve existing user work. Read the affected tests. Change API types and validation markers first, then run make generate manifests. Keep the generated CRD and chart CRD byte-identical. Edit generated deepcopy code through its generator. API group and module names are provisional and should be changed together when a public repository is chosen.
+
+Use gofmt for changed Go files, then focused tests and go vet. Before a handoff involving reconciliation, storage or upgrade logic, run make test and the relevant Kind scenario. For changed Python use the local virtual environment to run ruff check --fix and ruff format. Run helm lint charts/nats-cluster-operator for chart changes, bash -n for shell changes, and git diff --check before committing. If tools are unavailable, report which check remains unverified.
+
+## Local environment and data
+
+Use just up/status/logs/nodes/stop/down from the repo root. All Kubernetes actions must use the repository kubeconfig and explicit kind-nats-operator-dev context. Other local clusters and Docker projects may belong to the user. just stop preserves data; just down deletes the disposable lab and its storage. E2e tests require a fresh lab and write results to .state/evaluation.json. Keep the last requested running or stopped state unless the user authorizes a lifecycle change needed for a test.
+
+Keep credentials, kubeconfigs, binaries, logs and compiler caches out of Git. Use referenced Secrets and synthetic test data. Avoid logging credentials. Changes to namespace permissions, data deletion, adoption or maintenance actions need explicit behavior and focused regression checks. Persist progress before disruptive work and derive recovery from observed state. Preserve the health gate and retained-volume behavior.
+
+## Documentation and publication
+
+Document the implemented behavior, why it exists, commands to reproduce it, and limitations. Distinguish executed local tests from planned tests and hosted CI. A passing Kind test establishes the tested scenario on one Docker host. Update examples, scope, usage and test records when their behavior changes. Do not invent maintainer identities, security inboxes, release artifacts or upstream endorsement. Follow docs/releasing.md before publication. Commit and push only when explicitly authorized.

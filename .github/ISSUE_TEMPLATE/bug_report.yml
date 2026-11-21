@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible operator or local-lab failure.
+body:
+  - type: textarea
+    id: versions
+    attributes:
+      label: Environment and versions
+      description: Include Kubernetes, NATS, operator, OS and Kind versions as applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include a minimal resource and commands. Remove credentials and private endpoints.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted status and logs
+      description: Exclude tokens, kubeconfigs and other sensitive information.

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: nats-cluster-operator
+version: 0.1.0
+appVersion: "0.1.0"
+description: Experimental namespace-scoped NATS cluster provisioning controller

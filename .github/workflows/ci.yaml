@@ -1,0 +1,42 @@
+name: verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.9'
+      - run: make generate manifests test
+      - run: test -z "$(gofmt -l api cmd internal)" && git diff --exit-code
+      - uses: azure/setup-helm@v4.3.0
+        with:
+          version: v3.17.3
+      - run: helm lint charts/nats-cluster-operator
+      - run: |
+          python3 -m pip install ruff==0.11.13
+          ruff check tests/e2e.py
+          ruff format --check tests/e2e.py
+  kind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4.3.0
+        with:
+          version: v3.17.3
+      - run: |
+          curl -fsSL https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64 -o kind
+          chmod +x kind
+          sudo mv kind /usr/local/bin/kind
+      - run: make local-up
+      - run: python3 tests/e2e.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evaluation
+          path: .state/evaluation.json
+      - run: make local-down
+        if: always()

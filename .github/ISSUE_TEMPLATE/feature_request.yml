@@ -1,0 +1,22 @@
+name: Feature proposal
+description: Describe a NATS operation or adoption problem worth solving.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Current workflow and problem
+      description: Explain what you do today, how often, and what fails or takes manual effort.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior and failure recovery
+      description: Include authorization, interruption, retry and data-retention expectations.
+    validations:
+      required: true
+  - type: textarea
+    id: evaluation
+    attributes:
+      label: Evaluation plan
+      description: Describe a reproducible scenario and the measurements that would establish value.

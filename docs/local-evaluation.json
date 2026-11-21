@@ -1,0 +1,49 @@
+{
+  "cluster": "nats-operator-dev",
+  "checks": {
+    "podmonitor_accepted_by_upstream_CRD": "passed",
+    "two_independent_clusters_ready_from_monitoring": "passed",
+    "application_provisions_R3_streams_and_receives_publish_acknowledgements": "passed",
+    "unsupported_scale_down_rejected": "passed",
+    "upgrade_blocked_while_server_unhealthy": "passed",
+    "rolling_patch_upgrade_resumes_after_operator_restart": "passed",
+    "all_acknowledged_messages_retained_and_clusters_isolated": "passed",
+    "pod_recovery_preserves_messages": "passed",
+    "cluster_deletion_retains_running_workload_and_data": "passed"
+  },
+  "probeResults": {
+    "seed-platform": {
+      "acknowledged": 100,
+      "retry_errors": 0
+    },
+    "seed-other": {
+      "acknowledged": 100,
+      "retry_errors": 0
+    },
+    "load-upgrade": {
+      "acknowledged": 900,
+      "retry_errors": 0
+    },
+    "verify-platform": {
+      "verified": 900,
+      "missing": 0,
+      "cluster": "platform"
+    },
+    "verify-other": {
+      "verified": 100,
+      "missing": 0,
+      "cluster": "other"
+    },
+    "verify-recovery": {
+      "verified": 900,
+      "missing": 0,
+      "cluster": "platform"
+    },
+    "verify-retained": {
+      "verified": 100,
+      "missing": 0,
+      "cluster": "other"
+    }
+  },
+  "maxUnavailableDuringUpgrade": 1
+}
