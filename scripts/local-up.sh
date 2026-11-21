@@ -49,7 +49,8 @@ if ! kubectl --context kind-nats-operator-dev -n nats-demo get secret nats-auth 
 fi
 kubectl --context kind-nats-operator-dev -n nats-demo apply -f examples/local.yaml
 kubectl --context kind-nats-operator-dev -n nats-demo rollout status deployment/nats-operator --timeout=180s
-kubectl --context kind-nats-operator-dev -n nats-demo wait pods --selector=app.kubernetes.io/instance=local --for=condition=Ready --timeout=240s
+kubectl --context kind-nats-operator-dev -n nats-demo wait pod/local-0 --for=create --timeout=240s
+kubectl --context kind-nats-operator-dev -n nats-demo wait pod/local-0 --for=condition=Ready --timeout=240s
 kubectl --context kind-nats-operator-dev -n nats-demo wait natscluster/local --for=condition=Ready --timeout=240s
 kubectl --context kind-nats-operator-dev -n nats-demo get natsclusters,pods,pvc
 printf 'Environment ready. Run KUBECONFIG=%s kubectl -n nats-demo get natsclusters\n' "$KUBECONFIG"
