@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	natsv1 "github.com/Gravqc/Nats-Cluster-Operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -178,6 +179,30 @@ func TestStandaloneConfigDoesNotWaitForClusterRoutes(t *testing.T) {
 	}
 	if objects[3].(*appsv1.StatefulSet).Spec.PodManagementPolicy != appsv1.ParallelPodManagement {
 		t.Fatal("HA startup must not wait for the first pod to form quorum alone")
+	}
+}
+
+func TestLameDuckShutdownFitsTerminationGrace(t *testing.T) {
+	for _, replicas := range []int32{1, 3} {
+		cluster := fixture("ldm")
+		cluster.Spec.Replicas = replicas
+		objects := Resources(cluster, cluster.Spec)
+		config := objects[0].(*corev1.ConfigMap).Data["nats.conf"]
+		if !strings.Contains(config, "lame_duck_grace_period: \"10s\"\n") || !strings.Contains(config, "lame_duck_duration: \"30s\"\n") {
+			t.Fatalf("lame-duck timing must be explicit for %d servers:\n%s", replicas, config)
+		}
+		pod := objects[3].(*appsv1.StatefulSet).Spec.Template.Spec
+		if lifecycle := pod.Containers[0].Lifecycle; lifecycle == nil || lifecycle.PreStop == nil {
+			t.Fatal("preStop must enter lame-duck mode")
+		}
+		// SIGTERM is ignored during lame-duck mode; only SIGKILL ends it early.
+		needed := lameDuckGrace + lameDuckDuration + shutdownOverhead
+		if time.Duration(*pod.TerminationGracePeriodSeconds)*time.Second < needed {
+			t.Fatalf("termination grace %ds is shorter than %s", *pod.TerminationGracePeriodSeconds, needed)
+		}
+		if lameDuckGrace >= lameDuckDuration || lameDuckDuration < 30*time.Second {
+			t.Fatal("NATS rejects this lame-duck configuration")
+		}
 	}
 }
 

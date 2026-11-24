@@ -32,6 +32,17 @@ import (
 
 const finalizer = "nats.gravqc.github.io/retain-workloads"
 
+// NATS ignores SIGTERM while in lame-duck mode, so the whole shutdown must fit
+// the pod's termination grace period or Kubernetes kills it. These values match
+// the upstream chart; 30 seconds is the configuration-file minimum duration.
+// The overhead covers the final JetStream shutdown, as in the chart's sizing rule.
+const (
+	lameDuckGrace     = 10 * time.Second
+	lameDuckDuration  = 30 * time.Second
+	shutdownOverhead  = 20 * time.Second
+	terminationPeriod = 120 * time.Second
+)
+
 type Spec = natsv1.NatsClusterSpec
 
 type Reconciler struct{ client.Client }
@@ -280,19 +291,21 @@ http: 0.0.0.0:8222
 max_payload: 10485760
 authorization { token: $NATS_AUTH_TOKEN }
 jetstream { store_dir: /data/jetstream }
+lame_duck_grace_period: %q
+lame_duck_duration: %q
 cluster {
   name: %q
   listen: 0.0.0.0:6222
   advertise: $ROUTE_ADDRESS
   routes: %s
 }
-`, name, routeJSON)
+`, lameDuckGrace.String(), lameDuckDuration.String(), name, routeJSON)
 	if spec.Replicas == 1 {
 		config = strings.Split(config, "cluster {\n")[0]
 	}
 	nonroot, noPrivilege := true, false
 	user := int64(1000)
-	grace := int64(120)
+	grace := int64(terminationPeriod.Seconds())
 	disk := resource.MustParse(spec.Storage)
 	servicePorts := []corev1.ServicePort{{Name: "client", Port: 4222, TargetPort: intstr.FromInt32(4222)}}
 	headless := &corev1.Service{ObjectMeta: metadata(name + "-headless"), Spec: corev1.ServiceSpec{

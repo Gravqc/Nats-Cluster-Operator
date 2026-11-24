@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,9 +91,104 @@ func hold() error {
 	return nil
 }
 
+// churn keeps many reconnecting connections open for a fixed time and reports
+// how long each eviction left a connection without a server.
+func churn() error {
+	count, err := envInt("CONNECTIONS", 100, 1, 5000)
+	if err != nil {
+		return err
+	}
+	seconds, err := envInt("DURATION_S", 300, 1, 1800)
+	if err != nil {
+		return err
+	}
+	type event struct {
+		connection int
+		reconnect  bool
+		at         int64
+	}
+	events := make(chan event, 1024)
+	collected := []event{}
+	done := make(chan struct{})
+	go func() {
+		for item := range events {
+			collected = append(collected, item)
+		}
+		close(done)
+	}()
+	connections := make([]*nats.Conn, 0, count)
+	for i := 0; i < count; i++ {
+		index := i
+		connection, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.MaxReconnects(-1),
+			nats.DisconnectErrHandler(func(*nats.Conn, error) { events <- event{index, false, time.Now().UnixMilli()} }),
+			nats.ReconnectHandler(func(*nats.Conn) { events <- event{index, true, time.Now().UnixMilli()} }))
+		if err != nil {
+			return fmt.Errorf("connection %d: %w", i, err)
+		}
+		connections = append(connections, connection)
+	}
+	time.Sleep(time.Duration(seconds) * time.Second)
+	stillDisconnected := 0
+	for _, connection := range connections {
+		if !connection.IsConnected() {
+			stillDisconnected++
+		}
+		// Stop callbacks before closing so shutdown is not counted as an eviction.
+		connection.SetDisconnectErrHandler(nil)
+		connection.SetReconnectHandler(nil)
+		connection.Close()
+	}
+	// Let callbacks already dispatched before the handlers were cleared finish.
+	time.Sleep(time.Second)
+	close(events)
+	<-done
+	pending := map[int]int64{}
+	durations := []int64{}
+	perSecond := map[int64]int{}
+	disconnects, reconnects := 0, 0
+	for _, item := range collected {
+		if !item.reconnect {
+			disconnects++
+			pending[item.connection] = item.at
+			continue
+		}
+		reconnects++
+		perSecond[item.at/1000]++
+		if start, ok := pending[item.connection]; ok {
+			durations = append(durations, item.at-start)
+			delete(pending, item.connection)
+		}
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	percentile := func(fraction float64) int64 {
+		if len(durations) == 0 {
+			return 0
+		}
+		return durations[int(fraction*float64(len(durations)-1))]
+	}
+	peak := 0
+	for _, value := range perSecond {
+		peak = max(peak, value)
+	}
+	output, err := json.Marshal(map[string]interface{}{
+		"connections": len(connections), "disconnects": disconnects, "reconnects": reconnects,
+		"still_disconnected": stillDisconnected, "reconnect_p50_ms": percentile(0.5),
+		"reconnect_p99_ms": percentile(0.99), "reconnect_max_ms": percentile(1),
+		"peak_reconnects_per_second": peak,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(output))
+	return nil
+}
+
 func run() error {
 	if os.Getenv("MODE") == "hold" {
 		return hold()
+	}
+	if os.Getenv("MODE") == "churn" {
+		return churn()
 	}
 	connection, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
 	if err != nil {

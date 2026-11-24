@@ -147,3 +147,15 @@ did not meet the threshold for a change, so the operator code is unchanged.
 The configuration still does not meet the upstream chart's sizing rule, and
 large-store shutdown time was not measured. See
 [lame-duck-experiment.md](lame-duck-experiment.md).
+
+A follow-up trade-off experiment then measured a full operator upgrade with
+1,000 reconnecting clients and a JetStream publisher. It compared the defaults
+with the chart's 10-second grace and 30-second duration. The shorter setting
+cut the rollout from 283 to 119 seconds, and each restart from about 80 to 24
+seconds. Peak reconnects rose from 13 to 60 per second, with no client left
+disconnected, no publisher retries, and every payload verified. It met the
+pre-registered rule, so the operator now sets these values. See
+[lame-duck-experiment.md](lame-duck-experiment.md#results--2026-11-24-adopted).
+With the settings in place, all nine e2e checks, `tests/memory.py` and
+`tests/upgrade_comparison.py` passed on a fresh lab the same day (1,600 of
+1,600 payloads verified for both methods, at most one server unavailable).

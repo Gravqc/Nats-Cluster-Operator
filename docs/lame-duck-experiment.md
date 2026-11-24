@@ -112,3 +112,111 @@ python3 tests/lameduck.py baseline
 ```
 
 Results are written to `.state/lameduck-baseline.json`.
+
+## Trade-off experiment: 30-second duration
+
+Status: designed 2026-11-24, after the negative result above and before any
+trial of this comparison. The decision rule was fixed before collecting
+results.
+
+### Question
+
+Is a shorter lame-duck duration worth its cost during an operator-driven
+upgrade with many connected clients? The benefit is a shorter rollout. The
+cost is that evicted clients reconnect in a tighter burst.
+
+### Arms
+
+- **A:** the current operator, which inherits NATS's defaults (10s grace,
+  2m duration).
+- **B:** the same operator with `lame_duck_grace_period: "10s"` and
+  `lame_duck_duration: "30s"` in the generated configuration. These match the
+  official chart. The termination grace period stays 120s. This is a
+  fixed configuration value, not an API field.
+
+Each arm runs on its own fresh lab built from its source. The harness checks
+the generated configuration matches the arm before starting.
+
+### Procedure
+
+1. Create a three-server cluster on NATS 2.15.2 and an R3 stream with 100
+   seed messages.
+2. Open 1,000 core NATS connections through the client Service, using the
+   client library's default reconnect behavior with unlimited attempts. Each
+   connection records every disconnect and reconnect.
+3. Start one JetStream publisher on the client Service, 1 message every
+   20ms with message-ID retries.
+4. After 30 seconds of steady state, request the upgrade to 2.15.3. Watch
+   every pod and record each NATS container's exit code and its time from
+   delete request to exit.
+5. Wait for the rollout to finish, let both clients run to their fixed end,
+   then verify every acknowledged payload.
+
+### Measurements
+
+- Rollout seconds, from the upgrade request until every pod runs 2.15.3 and the
+  resource is Ready.
+- Per restart: exit code and seconds from the delete request to exit.
+- Clients: disconnects, reconnects, connections still disconnected at the
+  end, p50/p99/max time from disconnect to reconnect, and the peak number of
+  reconnects in any one second.
+- Publisher: retry errors, longest acknowledgement gap, and payload integrity.
+
+### Decision rule
+
+Adopt B only if all of these hold:
+
+1. B's rollout takes at most 70% of A's.
+2. Every restart in both arms exits 0.
+3. In B, no connection is still disconnected at the end, the publisher job
+   succeeds, and every acknowledged payload verifies.
+4. B's longest publisher gap is at most the larger of 2× A's and A's plus
+   1 second. B's retry errors are at most 2× A's plus 5.
+5. B's p99 reconnect time is at most the larger of 2× A's and 1 second.
+
+Peak reconnect rate is reported, but it does not decide the result by itself.
+It describes the mechanism, not harm. Otherwise the result is recorded as a
+trade-off and A stays. With one rollout per arm, this decides only for the
+tested scale and host. It is not a general performance claim.
+
+### Results — 2026-11-24: adopted
+
+One rollout per arm, each on a fresh Kind v0.33.0 lab (Kubernetes v1.35.8,
+one Docker host). The harness confirmed each arm's generated configuration
+before starting.
+
+| Measurement | A: 10s + 2m (defaults) | B: 10s + 30s |
+| --- | ---: | ---: |
+| Rollout seconds | 283.3 | 118.6 |
+| Restart exit codes | 0, 0, 0 | 0, 0, 0 |
+| Seconds from delete request to exit | 78, 79, 81 | 24, 24, 24 |
+| Client disconnects / reconnects | 1,560 / 1,560 | 1,587 / 1,587 |
+| Still disconnected at end | 0 | 0 |
+| Reconnect p50 / p99 / max, ms | 1 / 2 / 12 | 1 / 1 / 5 |
+| Peak reconnects in one second | 13 | 60 |
+| Publisher retry errors | 0 | 0 |
+| Longest publisher gap, seconds | 0.27 | 0.38 |
+| Acknowledged / verified / missing | 25,736 / 25,836 / 0 | 25,652 / 25,752 / 0 |
+
+Verified counts include the 100 seed messages.
+
+All five conditions held. B's rollout took 42% of A's time. Every restart
+exited cleanly. No connection stayed disconnected and every payload verified.
+The publisher's longest gap was 0.38s against a limit of 1.27s. The p99
+reconnect time was 1ms against a limit of 1s. **B is adopted**, and the
+operator now writes these two settings into every cluster's configuration.
+
+The expected cost showed up as a burstier reconnect rate: 60 per second
+against 13. At 1,000 clients on one host, that had no measured effect on
+reconnect latency or on the publisher. The test did not cover much larger
+client counts, servers under heavy load, clients with authentication callouts,
+or the transition for existing clusters. Servers read lame-duck settings at
+startup, so an existing cluster's first rollout after an operator upgrade is
+expected to use its previous timing. That was not tested.
+
+Reproduce each arm on its own fresh lab after `just up`:
+
+```sh
+python3 tests/lameduck_tradeoff.py A   # on a build without the settings
+python3 tests/lameduck_tradeoff.py B   # on the current build
+```
