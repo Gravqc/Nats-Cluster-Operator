@@ -12,7 +12,7 @@ generate: $(CONTROLLER_GEN)
 
 manifests: $(CONTROLLER_GEN)
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=config/crd/bases
-	cp config/crd/bases/messaging.nats.example_natsclusters.yaml charts/nats-cluster-operator/crds/natsclusters.yaml
+	cp config/crd/bases/nats.gravqc.github.io_natsclusters.yaml charts/nats-cluster-operator/crds/natsclusters.yaml
 
 test:
 	go test -race ./...
@@ -38,7 +38,7 @@ evaluate:
 
 .PHONY: local-status local-logs
 local-status:
-	KUBECONFIG=$(CURDIR)/.state/kubeconfig kubectl --context kind-nats-operator-dev -n nats-demo get natsclusters,pods,pvc
+	KUBECONFIG=$(CURDIR)/.state/kubeconfig kubectl --context kind-nats-operator-dev -n nats-demo get natsclusters.nats.gravqc.github.io,pods,pvc
 
 docker-status:
 	docker ps --filter label=io.x-k8s.kind.cluster=nats-operator-dev

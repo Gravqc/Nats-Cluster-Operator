@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	natsv1 "example.com/nats-cluster-operator/api/v1alpha1"
+	natsv1 "github.com/Gravqc/Nats-Cluster-Operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-const finalizer = "messaging.nats.example/retain-workloads"
+const finalizer = "nats.gravqc.github.io/retain-workloads"
 
 type Spec = natsv1.NatsClusterSpec
 

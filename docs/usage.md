@@ -7,7 +7,7 @@ Follow the local commands in README.md. A fresh clone needs Docker, Kind, Helm, 
 ## Describe a cluster
 
 ```yaml
-apiVersion: messaging.nats.example/v1alpha1
+apiVersion: nats.gravqc.github.io/v1alpha1
 kind: NatsCluster
 metadata:
   name: messaging

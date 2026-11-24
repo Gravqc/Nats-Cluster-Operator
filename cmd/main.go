@@ -1,10 +1,10 @@
 package main
 
 import (
-	natsv1 "example.com/nats-cluster-operator/api/v1alpha1"
+	natsv1 "github.com/Gravqc/Nats-Cluster-Operator/api/v1alpha1"
 	"os"
 
-	"example.com/nats-cluster-operator/internal/controller"
+	"github.com/Gravqc/Nats-Cluster-Operator/internal/controller"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -35,7 +35,7 @@ func main() {
 		Metrics:                 metricsserver.Options{BindAddress: "0"},
 		HealthProbeBindAddress:  ":8081",
 		LeaderElection:          true,
-		LeaderElectionID:        "nats-cluster-operator.messaging.nats.example",
+		LeaderElectionID:        "nats-cluster-operator.nats.gravqc.github.io",
 		LeaderElectionNamespace: namespace,
 	})
 	if err != nil {

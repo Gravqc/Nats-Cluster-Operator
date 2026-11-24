@@ -1,4 +1,4 @@
-module example.com/nats-cluster-operator
+module github.com/Gravqc/Nats-Cluster-Operator
 
 go 1.24.0
 

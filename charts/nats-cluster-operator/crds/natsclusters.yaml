@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: natsclusters.messaging.nats.example
+  name: natsclusters.nats.gravqc.github.io
 spec:
-  group: messaging.nats.example
+  group: nats.gravqc.github.io
   names:
     kind: NatsCluster
     listKind: NatsClusterList

@@ -2,11 +2,28 @@
 
 An experimental Kubernetes operator for provisioning independent NATS clusters from a small `NatsCluster` resource, with persistent JetStream storage and guarded rolling upgrades.
 
-Built with Kubebuilder v4.6.0, Go and controller-runtime. Install the controller once per managed namespace, then apply one resource for each cluster. Application code owns streams and consumers. Each cluster has its own StatefulSet, client Service, headless Service, ConfigMap, PVCs, PDB and NetworkPolicy. An optional per-cluster PodMonitor integrates with an existing Prometheus Operator.
+**Status: alpha in development.** The `v1alpha1` API may change. The public image
+and chart are pending publication. The [Kind quickstart](#try-it-in-kind) builds
+the operator locally.
 
-## Why this project?
+**Start here:** [Try it in Kind](#try-it-in-kind) ·
+[Install on Kubernetes](#install-on-kubernetes) ·
+[Add another cluster](#add-another-cluster) ·
+[Usage and troubleshooting](docs/usage.md)
 
-The goal is to let an engineer request an independent NATS cluster with an explicit server version and a small configuration, then inspect its readiness and perform a guarded rollout. Helm already provides server deployment. This project evaluates whether a Kubernetes API plus monitoring-aware maintenance makes repeated cluster operation easier. See [scope and acceptance criteria](docs/scope.md) for the current boundaries and [design](docs/design.md) for the reasoning.
+## How it fits with NATS
+
+The Helm chart installs the controller and registers the `NatsCluster` resource
+type. Each `NatsCluster` you apply requests a separate set of NATS brokers,
+Services and disks. The operator reports health and sequences deliberate
+restarts during upgrades using live JetStream replica status. Applications can
+continue to create streams and consumers through NATS.
+
+The [official NATS Helm chart](https://github.com/nats-io/k8s/tree/main/helm/charts/nats)
+deploys NATS directly. [NACK](https://github.com/nats-io/nack) manages JetStream
+resources such as streams and consumers, which are outside this operator's
+scope. This is an independent project, separate from the
+[archived NATS Operator](https://github.com/nats-io/nats-operator).
 
 ## Current scope
 
@@ -19,9 +36,12 @@ The goal is to let an engineer request an independent NATS cluster with an expli
 - Forward patch or adjacent-minor upgrades. Before each deliberate restart, all observed replicas must be current and every pod Ready. Metadata leader is considered last. The controller waits for ten seconds of observed stability between restarts.
 - CR deletion retains workloads and disks. Recreating the CR does not automatically adopt retained resources.
 
-This is a local prototype. Read [evaluation](docs/evaluation.md) for executed results and the limits of those results. Scaling, volume expansion, credential rotation, client rebalancing and automatic adoption remain unimplemented operations discussed in [operations](docs/operations.md).
+The alpha uses token authentication over a trusted network. Client and route
+TLS, scaling, storage expansion, and in-place Helm adoption are outside its
+current scope. See [tested versions and results](docs/evaluation.md),
+[scope](docs/scope.md), and [maintenance limits](docs/operations.md).
 
-## One local environment
+## Try it in Kind
 
 Prerequisites are Docker, Kind v0.33.0, Helm 3, kubectl, Python 3, OpenSSL, Just and Make. The local flow builds Go inside Docker, so a host Go installation is optional. Kind creates one named environment, `nats-operator-dev`, using four node containers. The controller and NATS pods run inside that environment. Docker's container view shows the four Kind nodes; these are separate from Compose project groups. Run the commands below from this repository. `just` is a task runner that provides short names for the lab commands. The local recipes delegate to the Makefile used by the Go development tooling. `just status` shows the NATS pods; `just nodes` shows the Docker containers that host Kubernetes.
 
@@ -47,24 +67,75 @@ kubectl --context kind-nats-operator-dev -n nats-demo port-forward service/local
 
 Clients on the host then use `nats://127.0.0.1:14222` with the token in the `nats-auth` Secret. The [usage guide](docs/usage.md) explains the API, status, upgrade observation, retained workloads and troubleshooting.
 
-## Install on your own cluster
+## Install on Kubernetes
 
-Build and push your own operator image, then set its repository and tag explicitly. The following commands assume a reachable image has already been published. The Helm chart lives in this repository; no external chart repository is required for this install.
+The following uses a source checkout and an operator image you have already
+built and pushed to a registry your workers can pull from. Use Helm 3, kubectl,
+OpenSSL, and a storage class that can provision PVCs. The HA example requires
+three eligible workers. See [the release checklist](docs/releasing.md) for the
+planned packaged install and [evaluation](docs/evaluation.md) for the Kubernetes
+and NATS versions exercised so far.
+
+### Install the controller
 
 ```sh
 helm upgrade --install nats-operator ./charts/nats-cluster-operator \
   --namespace messaging --create-namespace \
   --set image.repository=YOUR_REGISTRY/nats-cluster-operator \
-  --set image.tag=0.1.0
+  --set image.tag=0.1.0 --wait
+```
+
+### Create and verify a cluster
+
+From the checkout, run:
+
+```sh
 export NATS_TOKEN="$(openssl rand -hex 24)"
 kubectl -n messaging create secret generic nats-auth --from-literal=token="$NATS_TOKEN"
 kubectl -n messaging apply -f examples/ha.yaml
 kubectl -n messaging wait natscluster/platform --for=condition=Ready --timeout=240s
+kubectl -n messaging get natscluster/platform
 ```
+
+The last command should show `True` in the `READY` column and the in-cluster NATS URL. Connect
+using the token from the Secret above. The local example shows how to use a
+port-forward for a client outside Kubernetes.
 
 The controller watches its installation namespace and uses namespace-scoped RBAC. Use one installation per namespace. Different clusters in one namespace use distinct names and can share workers. PodMonitor requires `monitoring.coreos.com/v1` to be installed first; set `spec.podMonitor: true` when initially creating the cluster, and configure Prometheus to select it.
 
+**Before cleanup:** Deleting a `NatsCluster` leaves its brokers and disks
+running. Follow the [migration and retention guide](docs/migration.md) before
+removing a deployment you want to preserve.
+
 CRDs under Helm's `crds/` directory install on first install and are retained on uninstall. Apply the versioned generated CRD explicitly before upgrading a controller release that changes its API. Deleting the namespace or CRD is destructive and bypasses the normal retained-workload workflow. See [migration](docs/migration.md).
+
+## Add another cluster
+
+Install the controller once in the namespace. Each `NatsCluster` is one
+independent cluster with its own Service and disks. To create a second cluster,
+copy [the HA example](examples/ha.yaml), set a different `metadata.name`, and
+set the exact NATS server version in `spec.version`:
+
+```yaml
+apiVersion: nats.gravqc.github.io/v1alpha1
+kind: NatsCluster
+metadata:
+  name: analytics
+spec:
+  version: "2.12.5"
+  replicas: 3
+  storage: 1Gi
+  credentialsSecret: analytics-nats-auth
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+```
+
+Create the referenced Secret with a `token` key in the same namespace, then
+apply the YAML. The existing cluster can keep its own version. Read
+`status.clientURL` on each resource for its endpoint. Application code creates
+the streams and consumers it needs on that endpoint.
 
 ## Development
 
@@ -79,6 +150,15 @@ make image
 
 ## Adoption and publication
 
-The API group `messaging.nats.example` and Go module `example.com/nats-cluster-operator` are provisional, reserved example names. Before the first public release, choose the repository/module path and a stable API group, regenerate files, publish signed versioned images and chart packages, and configure private vulnerability reporting. Changing the API group after adoption requires migration.
+The public alpha uses API group `nats.gravqc.github.io` and Go module `github.com/Gravqc/Nats-Cluster-Operator`. Existing prototype resources require a separate migration. The first public release will distribute a pinned image and a matching Helm chart.
 
 See [scope](docs/scope.md), [usage](docs/usage.md), [design](docs/design.md), [operations](docs/operations.md), [migration](docs/migration.md), [contributing](CONTRIBUTING.md) and [release checklist](docs/releasing.md). This project is independent and makes no upstream endorsement claim.
+
+## Help and contributions
+
+Use [GitHub Issues](https://github.com/Gravqc/Nats-Cluster-Operator/issues) for
+bugs and feature ideas. Include the operator and NATS versions and a minimal
+reproducer with credentials removed. See [Contributing](CONTRIBUTING.md) and the
+[security reporting policy](SECURITY.md).
+
+Licensed under [Apache 2.0](LICENSE).

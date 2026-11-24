@@ -1,4 +1,4 @@
-apiVersion: messaging.nats.example/v1alpha1
+apiVersion: nats.gravqc.github.io/v1alpha1
 kind: NatsCluster
 metadata:
   name: local

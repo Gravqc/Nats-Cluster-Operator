@@ -3,19 +3,19 @@
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
 cliVersion: 4.6.0
-domain: nats.example
+domain: gravqc.github.io
 layout:
 - go.kubebuilder.io/v4
 projectName: project
-repo: example.com/nats-cluster-operator
+repo: github.com/Gravqc/Nats-Cluster-Operator
 resources:
 - api:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: nats.example
-  group: messaging
+  domain: gravqc.github.io
+  group: nats
   kind: NatsCluster
-  path: example.com/nats-cluster-operator/api/v1alpha1
+  path: github.com/Gravqc/Nats-Cluster-Operator/api/v1alpha1
   version: v1alpha1
 version: "3"

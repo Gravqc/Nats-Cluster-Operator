@@ -26,7 +26,7 @@ Record negative or inconclusive comparisons as such; never assume Helm loses dat
 
 ## Changes and generated files
 
-Inspect the working tree and relevant callers before editing. Keep changes small and preserve existing user work. Read the affected tests. Change API types and validation markers first, then run make generate manifests. Keep the generated CRD and chart CRD byte-identical. Edit generated deepcopy code through its generator. The public repository is github.com/Gravqc/Nats-Cluster-Operator. API group and module names remain provisional; any future rename must update them together and document the API migration.
+Inspect the working tree and relevant callers before editing. Keep changes small and preserve existing user work. Read the affected tests. Change API types and validation markers first, then run make generate manifests. Keep the generated CRD and chart CRD byte-identical. Edit generated deepcopy code through its generator. The public repository is github.com/Gravqc/Nats-Cluster-Operator. The public API group is `nats.gravqc.github.io`. Changing it requires a migration plan for existing resources.
 
 Use gofmt for changed Go files, then focused tests and go vet. Before a handoff involving reconciliation, storage or upgrade logic, run make test and the relevant Kind scenario. For changed Python use the local virtual environment to run ruff check --fix and ruff format. Run helm lint charts/nats-cluster-operator for chart changes, bash -n for shell changes, and git diff --check before committing. If tools are unavailable, report which check remains unverified.
 

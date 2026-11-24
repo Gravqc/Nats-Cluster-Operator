@@ -11,3 +11,13 @@ Begin with a separate operator-managed cluster. Existing Helm resources are neve
 An in-place ownership handoff is future work. It must preserve server identity, PVC bindings, config paths and immutable Service/StatefulSet fields, pause the previous GitOps owner, transfer owner references, and survive interruption with rollback. Deleting a StatefulSet with orphan propagation is only one step of that migration. It is not sufficient evidence that a running deployment can be adopted safely.
 
 Deleting a NatsCluster in v0.1 retains its StatefulSet, Services, ConfigMap, PDB, NetworkPolicy and optional PodMonitor. This leaves a running workload that requires manual management. Recreating the CR with the same name is intentionally rejected. To completely remove a disposable evaluation, use `make local-down`; it deletes the dedicated Kind cluster and its local storage.
+
+## Moving from the prototype API group
+
+The alpha uses `nats.gravqc.github.io/v1alpha1`. The earlier
+`messaging.nats.example/v1alpha1` resources belong to a different Kubernetes API.
+Their owned Services and StatefulSets cannot be adopted by an alpha resource.
+For a disposable lab, start a clean lab after you have explicitly decided to
+discard the old one. To keep data, use a separate namespace or cluster and
+follow the migration steps above. Keep the prototype controller available for
+any prototype resources that still need reconciliation or finalization.

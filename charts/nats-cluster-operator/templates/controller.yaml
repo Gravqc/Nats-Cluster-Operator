@@ -8,7 +8,7 @@ kind: Role
 metadata:
   name: {{ .Release.Name }}
 rules:
-  - apiGroups: [messaging.nats.example]
+  - apiGroups: [nats.gravqc.github.io]
     resources: [natsclusters, natsclusters/status, natsclusters/finalizers]
     verbs: [get, list, watch, create, update, patch]
   - apiGroups: [apps]

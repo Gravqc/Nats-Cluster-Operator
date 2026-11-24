@@ -1,6 +1,6 @@
 image:
-  repository: nats-cluster-operator
-  tag: "0.1.0"
+  repository: ghcr.io/gravqc/nats-cluster-operator
+  tag: "0.1.0-alpha.1"
   pullPolicy: IfNotPresent
 resources:
   requests:
