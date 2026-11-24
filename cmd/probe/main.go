@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -11,12 +13,31 @@ import (
 
 const seedCount = 100
 
+// gap is an interval without a successful publish acknowledgement.
+type gap struct {
+	StartMillis int64 `json:"start_ms"`
+	EndMillis   int64 `json:"end_ms"`
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
+
+func envInt(name string, fallback, lowest, highest int) (int, error) {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < lowest || parsed > highest {
+		return 0, fmt.Errorf("%s must be between %d and %d", name, lowest, highest)
+	}
+	return parsed, nil
+}
+
 func run() error {
 	connection, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
 	if err != nil {
@@ -27,7 +48,44 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Optional padding makes each payload larger without changing its identity.
+	// Seed, load and verify runs for one stream must use the same value.
+	pad, err := envInt("PAD_BYTES", 0, 0, 1<<20)
+	if err != nil {
+		return err
+	}
+	payloadFor := func(i int) string {
+		payload := fmt.Sprintf("%s-%d", os.Getenv("CLUSTER"), i)
+		if pad > 0 {
+			payload += "|" + strings.Repeat("x", pad)
+		}
+		return payload
+	}
 	mode := os.Getenv("MODE")
+	if mode == "stepdown" {
+		// Ask the current stream leader to step down so another replica leads.
+		response, err := connection.Request("$JS.API.STREAM.LEADER.STEPDOWN.EVAL", nil, 5*time.Second)
+		if err != nil {
+			return err
+		}
+		var result struct {
+			Success bool `json:"success"`
+			Error   *struct {
+				Description string `json:"description"`
+			} `json:"error"`
+		}
+		if err = json.Unmarshal(response.Data, &result); err != nil {
+			return err
+		}
+		if !result.Success {
+			if result.Error != nil {
+				return fmt.Errorf("stepdown failed: %s", result.Error.Description)
+			}
+			return fmt.Errorf("stepdown failed")
+		}
+		fmt.Println(`{"stepped_down":true}`)
+		return nil
+	}
 	if mode == "seed" {
 		replicas, _ := strconv.Atoi(os.Getenv("REPLICAS"))
 		if replicas == 0 {
@@ -61,14 +119,32 @@ func run() error {
 			}
 			interval = time.Duration(millis) * time.Millisecond
 		}
+		// A duration bounds a load run by time instead of count. The message cap
+		// still applies, and the output reports how many were acknowledged.
+		duration, err := envInt("DURATION_S", 0, 0, 1800)
+		if err != nil {
+			return err
+		}
+		var deadline time.Time
+		if mode == "load" && duration > 0 {
+			count = 100000
+			deadline = time.Now().Add(time.Duration(duration) * time.Second)
+		}
 		acked := 0
 		timeouts := 0
+		gaps := []gap{}
+		maxGap := time.Duration(0)
+		started := time.Now()
+		lastAck := started
 		for i := start; i < start+count; i++ {
-			payload := fmt.Sprintf("%s-%d", os.Getenv("CLUSTER"), i)
+			if !deadline.IsZero() && time.Now().After(deadline) {
+				break
+			}
+			payload := payloadFor(i)
 			// Retries keep one message ID, so an ambiguous acknowledgement is deduplicated.
 			var ack *nats.PubAck
 			for attempt := 0; attempt < 30; attempt++ {
-				ack, err = js.Publish("eval.events", []byte(payload), nats.MsgId(payload))
+				ack, err = js.Publish("eval.events", []byte(payload), nats.MsgId(fmt.Sprintf("%s-%d", os.Getenv("CLUSTER"), i)))
 				if err == nil {
 					break
 				}
@@ -81,10 +157,29 @@ func run() error {
 			if ack.Sequence == 0 {
 				return fmt.Errorf("publish returned no sequence")
 			}
+			now := time.Now()
+			if elapsed := now.Sub(lastAck); elapsed > maxGap {
+				maxGap = elapsed
+			}
+			if now.Sub(lastAck) > time.Second {
+				gaps = append(gaps, gap{StartMillis: lastAck.UnixMilli(), EndMillis: now.UnixMilli()})
+			}
+			lastAck = now
 			acked++
 			if mode == "load" {
 				time.Sleep(interval)
 			}
+		}
+		if mode == "load" && (pad > 0 || duration > 0) {
+			report, err := json.Marshal(map[string]interface{}{
+				"acknowledged": acked, "retry_errors": timeouts, "max_gap_ms": maxGap.Milliseconds(),
+				"gaps": gaps, "started_ms": started.UnixMilli(), "ended_ms": lastAck.UnixMilli(),
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(report))
+			return nil
 		}
 		fmt.Printf("{\"acknowledged\":%d,\"retry_errors\":%d}\n", acked, timeouts)
 		return nil
@@ -105,8 +200,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		want := fmt.Sprintf("%s-%d", os.Getenv("CLUSTER"), i)
-		if string(message.Data) != want {
+		if string(message.Data) != payloadFor(i) {
 			return fmt.Errorf("message %d differs or crossed clusters", i)
 		}
 	}

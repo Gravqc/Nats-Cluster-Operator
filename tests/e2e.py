@@ -72,17 +72,16 @@ def cluster(name):
     wait(lambda: ready(name), "waiting for " + name)
 
 
-def probe(name, cluster_name, mode, expected=SEED_COUNT, count=None):
-    env = [
-        {"name": key, "value": value}
-        for key, value in {
-            "NATS_URL": "nats://" + cluster_name + ":4222",
-            "CLUSTER": cluster_name,
-            "MODE": mode,
-            "EXPECTED": str(expected),
-            "REPLICAS": "3",
-        }.items()
-    ]
+def probe(name, cluster_name, mode, expected=SEED_COUNT, count=None, extra=None):
+    values = {
+        "NATS_URL": "nats://" + cluster_name + ":4222",
+        "CLUSTER": cluster_name,
+        "MODE": mode,
+        "EXPECTED": str(expected),
+        "REPLICAS": "3",
+    }
+    values.update(extra or {})
+    env = [{"name": key, "value": value} for key, value in values.items()]
     if count is not None:
         env.append({"name": "COUNT", "value": str(count)})
     env.append(

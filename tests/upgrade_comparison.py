@@ -32,10 +32,14 @@ REPORT = {
 }
 
 
-def helm(version):
-    path = ROOT / ".state" / "comparison-values.json"
+def helm(version, name=NAMES[0]):
+    path = (
+        ROOT
+        / ".state"
+        / ("comparison-values.json" if name == NAMES[0] else name + "-values.json")
+    )
     values = {
-        "fullnameOverride": NAMES[0],
+        "fullnameOverride": name,
         "config": {
             "cluster": {"enabled": True, "replicas": 3},
             "jetstream": {"enabled": True, "fileStore": {"pvc": {"size": "1Gi"}}},
@@ -64,7 +68,7 @@ def helm(version):
                                 {
                                     "labelSelector": {
                                         "matchLabels": {
-                                            "app.kubernetes.io/instance": NAMES[0]
+                                            "app.kubernetes.io/instance": name
                                         }
                                     },
                                     "topologyKey": "kubernetes.io/hostname",
@@ -82,7 +86,7 @@ def helm(version):
             "helm",
             "upgrade",
             "--install",
-            NAMES[0],
+            name,
             str(ROOT / ".state/comparison-nats.tgz"),
             "--kube-context",
             "kind-nats-operator-dev",

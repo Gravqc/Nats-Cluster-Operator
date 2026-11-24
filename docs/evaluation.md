@@ -115,3 +115,23 @@ Helm does not upgrade CRDs from `crds/` during an upgrade. Kind loading a rebuil
 image also does not replace an existing pod. The local script now handles both
 steps explicitly. This check covers resume/update of an existing installation;
 the hosted runs above cover fresh installation.
+
+## Lagging-replica rollout comparison — 2026-11-24
+
+A pre-registered experiment compared the pinned chart and the operator while
+one Ready stream replica was held behind by a route-traffic throttle. The
+design, decision rule and results are in
+[catchup-experiment.md](catchup-experiment.md). In the valid run, the chart's
+StatefulSet restarted all three servers while a replica was not current. The
+first restart stalled acknowledgements for 6.0 seconds, on a publisher whose
+own server was not restarted. The operator restarted nothing until the
+replica caught up, with no acknowledgement gap over 1 second and a slower
+rollout. Both trials verified every acknowledged payload. An earlier run was
+excluded for a sampling-order defect in the harness, described in that record.
+This is one run per method on one Docker host, with artificially induced lag.
+
+The probe gained opt-in padding, duration-bounded load, gap reporting and a
+stream-leader stepdown for this experiment. Its defaults are unchanged. On a
+fresh lab the same day, all nine e2e checks, `tests/memory.py` and
+`tests/upgrade_comparison.py` passed again (1,600 of 1,600 payloads verified
+for both methods, at most one server unavailable).
