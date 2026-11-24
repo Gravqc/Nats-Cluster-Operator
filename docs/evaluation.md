@@ -135,3 +135,15 @@ stream-leader stepdown for this experiment. Its defaults are unchanged. On a
 fresh lab the same day, all nine e2e checks, `tests/memory.py` and
 `tests/upgrade_comparison.py` passed again (1,600 of 1,600 payloads verified
 for both methods, at most one server unavailable).
+
+## Lame-duck shutdown timing — 2026-11-24: negative
+
+A pre-registered check timed deliberate restarts of a server holding 300
+client connections, using the default lame-duck settings the operator
+inherits. In three trials the NATS container exited with code 0 after 80–81
+seconds, about 40 seconds inside the 120-second termination grace period.
+Clients were closed from about 10 to about 81 seconds. The current timing
+did not meet the threshold for a change, so the operator code is unchanged.
+The configuration still does not meet the upstream chart's sizing rule, and
+large-store shutdown time was not measured. See
+[lame-duck-experiment.md](lame-duck-experiment.md).

@@ -38,7 +38,62 @@ func envInt(name string, fallback, lowest, highest int) (int, error) {
 	return parsed, nil
 }
 
+// hold opens many connections without reconnection and reports when the server
+// closed them, to time lame-duck client eviction.
+func hold() error {
+	count, err := envInt("CONNECTIONS", 100, 1, 2000)
+	if err != nil {
+		return err
+	}
+	seconds, err := envInt("HOLD_S", 300, 1, 1800)
+	if err != nil {
+		return err
+	}
+	closed := make(chan int64, count)
+	connections := make([]*nats.Conn, 0, count)
+	defer func() {
+		for _, connection := range connections {
+			connection.Close()
+		}
+	}()
+	for i := 0; i < count; i++ {
+		connection, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.NoReconnect(),
+			nats.DisconnectErrHandler(func(*nats.Conn, error) { closed <- time.Now().UnixMilli() }))
+		if err != nil {
+			return fmt.Errorf("connection %d: %w", i, err)
+		}
+		connections = append(connections, connection)
+	}
+	times := []int64{}
+	deadline := time.After(time.Duration(seconds) * time.Second)
+	for len(times) < count {
+		select {
+		case at := <-closed:
+			times = append(times, at)
+		case <-deadline:
+			count = len(times)
+		}
+	}
+	report := map[string]interface{}{"connections": len(connections), "closed": len(times)}
+	if len(times) > 0 {
+		first, last := times[0], times[0]
+		for _, at := range times {
+			first, last = min(first, at), max(last, at)
+		}
+		report["first_closed_ms"], report["last_closed_ms"] = first, last
+	}
+	output, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(output))
+	return nil
+}
+
 func run() error {
+	if os.Getenv("MODE") == "hold" {
+		return hold()
+	}
 	connection, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.MaxReconnects(-1), nats.ReconnectWait(200*time.Millisecond))
 	if err != nil {
 		return err
