@@ -38,16 +38,182 @@ const finalizer = "nats.gravqc.github.io/retain-workloads"
 const maxTokenBytes = 3072
 const maxControlLineBytes = 4096
 
-// Older clusters may already use longer tokens. Keep them if the token fits
-// in a minimal CONNECT, with additional client fields left to the client.
+func fromHex(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func decodeNatsEscape(raw []byte, i int) (byte, int, bool) {
+	if i+1 >= len(raw) {
+		return 0, 0, false
+	}
+	switch raw[i+1] {
+	case 'x':
+		if i+3 >= len(raw) {
+			return 0, 0, false
+		}
+		hi, ok1 := fromHex(raw[i+2])
+		lo, ok2 := fromHex(raw[i+3])
+		if !ok1 || !ok2 {
+			return 0, 0, false
+		}
+		return hi<<4 | lo, i + 4, true
+	case 't':
+		return '\t', i + 2, true
+	case 'n':
+		return '\n', i + 2, true
+	case 'r':
+		return '\r', i + 2, true
+	case '"':
+		return '"', i + 2, true
+	case '\\':
+		return '\\', i + 2, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func trailingConfigIgnored(rest []byte) bool {
+	for len(rest) > 0 {
+		switch rest[0] {
+		case ' ', '\t', '\r', '\n', ';', ',':
+			rest = rest[1:]
+		case '#':
+			if nl := bytes.IndexByte(rest, '\n'); nl >= 0 {
+				rest = rest[nl+1:]
+			} else {
+				return true
+			}
+		case '/':
+			if len(rest) < 2 || rest[1] != '/' {
+				return false
+			}
+			if nl := bytes.IndexByte(rest, '\n'); nl >= 0 {
+				rest = rest[nl+1:]
+			} else {
+				return true
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// decodeLegacyToken mirrors NATS's config value parsing for $NATS_AUTH_TOKEN
+// so legacy Secrets with NATS escape sequences are measured by decoded length.
+func decodeLegacyToken(raw []byte) (string, bool) {
+	s := bytes.TrimLeft(raw, " \t")
+	if len(s) == 0 || s[0] == '\n' || s[0] == '\r' {
+		return "", false
+	}
+	var out, rest []byte
+	switch s[0] {
+	case '\'':
+		end := bytes.IndexByte(s[1:], '\'')
+		if end < 0 || end >= maxControlLineBytes {
+			return "", false
+		}
+		out = s[1 : 1+end]
+		rest = s[2+end:]
+	case '"':
+		out = make([]byte, 0, min(len(s), maxControlLineBytes))
+		closed := false
+		for i := 1; i < len(s); {
+			if s[i] == '\\' {
+				b, next, ok := decodeNatsEscape(s, i)
+				if !ok {
+					return "", false
+				}
+				out = append(out, b)
+				i = next
+			} else if s[i] == '"' {
+				rest = s[i+1:]
+				closed = true
+				break
+			} else {
+				out = append(out, s[i])
+				i++
+			}
+			if len(out) >= maxControlLineBytes {
+				return "", false
+			}
+		}
+		if !closed {
+			return "", false
+		}
+	case '(':
+		idx := bytes.Index(s[1:], []byte("\n)"))
+		for idx >= 0 {
+			after := 1 + idx + 2
+			if after == len(s) || s[after] == '\n' || s[after] == '\r' {
+				out = s[1 : 1+idx+1]
+				rest = s[after:]
+				break
+			}
+			next := bytes.Index(s[after:], []byte("\n)"))
+			if next < 0 {
+				idx = -1
+				break
+			}
+			idx = after - 1 + next
+		}
+		if idx < 0 || len(out) >= maxControlLineBytes {
+			return "", false
+		}
+	default:
+		out = make([]byte, 0, min(len(s), maxControlLineBytes))
+		i := 0
+		for i < len(s) {
+			c := s[i]
+			if c == '\\' {
+				b, next, ok := decodeNatsEscape(s, i)
+				if !ok {
+					return "", false
+				}
+				out = append(out, b)
+				i = next
+			} else if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ';' || c == ',' || c == ']' || c == '}' || c == '\'' {
+				if c == '\'' {
+					i++
+				}
+				break
+			} else {
+				out = append(out, c)
+				i++
+			}
+			if len(out) >= maxControlLineBytes {
+				return "", false
+			}
+		}
+		rest = s[i:]
+	}
+	if len(out) == 0 || !trailingConfigIgnored(rest) {
+		return "", false
+	}
+	return string(out), true
+}
+
+// Older clusters may already use longer tokens. Keep them if the decoded
+// NATS config token fits in a minimal CONNECT, with additional client fields
+// left to the client.
 func legacyTokenFits(token []byte) bool {
-	if len(token) >= maxControlLineBytes {
+	decoded, ok := decodeLegacyToken(token)
+	if !ok || len(decoded) >= maxControlLineBytes {
 		return false
 	}
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)
 	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(map[string]string{"auth_token": string(token)}); err != nil {
+	if err := encoder.Encode(map[string]string{"auth_token": decoded}); err != nil {
 		return false
 	}
 	// NATS measures the JSON argument alone. Exclude Encoder's trailing LF.

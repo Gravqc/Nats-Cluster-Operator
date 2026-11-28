@@ -247,14 +247,32 @@ func TestTokenMustRoundTripAsUnquotedText(t *testing.T) {
 }
 
 func TestLegacyTokenControlLine(t *testing.T) {
-	for _, size := range []int{3200, 4075, 4079} {
-		if !legacyTokenFits([]byte(strings.Repeat("a", size))) {
-			t.Errorf("a %d-byte legacy token must fit the CONNECT argument", size)
+	for _, token := range []string{
+		strings.Repeat("a", 3200),
+		strings.Repeat("a", 4075),
+		strings.Repeat("a", 4079),
+		`"` + strings.Repeat("a", 4079) + `"`,
+		`'` + strings.Repeat("a", 4079) + `'`,
+		"nats_" + strings.Repeat(`\x61`, 1124),
+		`"nats_` + strings.Repeat(`\x61`, 1124) + `"`,
+		"nats_" + strings.Repeat(`\x61`, 4074),
+		"nats_abc # " + strings.Repeat("x", 4500),
+	} {
+		if !legacyTokenFits([]byte(token)) {
+			t.Errorf("legacy token (%d raw bytes) must fit the CONNECT argument", len(token))
 		}
 	}
-	for _, token := range []string{strings.Repeat("a", 4080), strings.Repeat("a", 4505), strings.Repeat("\"", 3200)} {
+	for _, token := range []string{
+		strings.Repeat("a", 4080),
+		strings.Repeat("a", 4505),
+		strings.Repeat("\"", 3200),
+		`"` + strings.Repeat(`\"`, 3200) + `"`,
+		`'` + strings.Repeat(`\x61`, 1124) + `'`,
+		"nats_" + strings.Repeat(`\x61`, 4075),
+		`"nats_` + strings.Repeat(`\z`, 2000) + `"`,
+	} {
 		if legacyTokenFits([]byte(token)) {
-			t.Fatal("token longer than a CONNECT line was accepted")
+			t.Fatalf("invalid or oversized legacy token (%d raw bytes) was accepted", len(token))
 		}
 	}
 }
