@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,6 +32,34 @@ import (
 )
 
 const finalizer = "nats.gravqc.github.io/retain-workloads"
+
+var (
+	tokenText         = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_+./=-]*$`)
+	tokenNumberSuffix = regexp.MustCompile(`(?i)^[kmgtpe][bi]*$`)
+)
+
+// NATS parses an environment variable as configuration syntax. Restrict the
+// token to unquoted text that the parser passes through unchanged.
+func validToken(token []byte) bool {
+	if !tokenText.Match(token) {
+		return false
+	}
+	value := string(token)
+	switch strings.ToLower(value) {
+	case "true", "false", "on", "off", "yes", "no":
+		return false
+	}
+	afterDigits := strings.TrimLeft(value, "0123456789")
+	return afterDigits != "" && (len(afterDigits) == len(value) ||
+		(!strings.HasPrefix(afterDigits, ".") && !strings.HasPrefix(afterDigits, "-") &&
+			!tokenNumberSuffix.MatchString(afterDigits)))
+}
+
+func memoryLimitBytes(spec Spec) int64 {
+	limit := spec.Resources.Limits.Memory().Value()
+	percent := int64(*spec.GoMemoryLimitPercent)
+	return limit/100*percent + limit%100*percent/100
+}
 
 type Spec = natsv1.NatsClusterSpec
 
@@ -74,8 +103,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	if len(secret.Data["token"]) == 0 {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "CredentialsMissing", "Credentials Secret requires a nonempty token key")
 	}
-	if spec.GoMemoryLimitPercent != nil && spec.Resources.Limits.Memory().Value() <= 0 {
-		return ctrl.Result{}, r.status(ctx, object, false, "InvalidMemoryPolicy", "goMemoryLimitPercent requires a positive container memory limit")
+	// Previously healthy clusters already passed startup with their credentials.
+	// Keep those credentials grandfathered while rotation remains unsupported.
+	if object.Status.AppliedVersion == "" && !validToken(secret.Data["token"]) {
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "CredentialsInvalid", "Use an unquoted text token such as nats_ followed by random hexadecimal characters")
+	}
+	if spec.GoMemoryLimitPercent != nil && memoryLimitBytes(spec) <= 0 {
+		return ctrl.Result{}, r.status(ctx, object, false, "InvalidMemoryPolicy", "goMemoryLimitPercent requires a container memory limit that yields at least one byte")
 	}
 	// Freeze the version request until the current rollout finishes. Updating the
 	// StatefulSet again could otherwise let a failed pod skip a server minor.
@@ -194,7 +228,15 @@ func (r *Reconciler) apply(ctx context.Context, parent *natsv1.NatsCluster, desi
 			for i := range current.Spec.Template.Spec.Containers {
 				for _, container := range wanted.Spec.Template.Spec.Containers {
 					if current.Spec.Template.Spec.Containers[i].Name == container.Name {
-						current.Spec.Template.Spec.Containers[i].Image = container.Image
+						currentContainer := &current.Spec.Template.Spec.Containers[i]
+						currentContainer.Image = container.Image
+						if container.Name == "nats" && parent.Spec.GoMemoryLimitPercent != nil {
+							for j := range currentContainer.Env {
+								if currentContainer.Env[j].Name == "GOMEMLIMIT" {
+									currentContainer.Env[j].Value = fmt.Sprintf("%dB", memoryLimitBytes(parent.Spec))
+								}
+							}
+						}
 					}
 				}
 			}
@@ -337,9 +379,7 @@ cluster {
 	// Each broker runs its own collector. Never flush host caches or delete
 	// JetStream files in response to memory pressure.
 	if spec.GoMemoryLimitPercent != nil {
-		limit := spec.Resources.Limits.Memory().Value()
-		bytes := limit / 100 * int64(*spec.GoMemoryLimitPercent)
-		statefulSet.Spec.Template.Spec.Containers[0].Env = append(statefulSet.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "GOMEMLIMIT", Value: fmt.Sprintf("%dB", bytes)})
+		statefulSet.Spec.Template.Spec.Containers[0].Env = append(statefulSet.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "GOMEMLIMIT", Value: fmt.Sprintf("%dB", memoryLimitBytes(spec))})
 	}
 	if spec.GoGCPercent != nil {
 		statefulSet.Spec.Template.Spec.Containers[0].Env = append(statefulSet.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "GOGC", Value: fmt.Sprint(*spec.GoGCPercent)})

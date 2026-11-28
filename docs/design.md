@@ -22,7 +22,7 @@ Health status represents a polling observation, not continuous availability. Lar
 
 ## Deletion and ownership
 
-Every child has a controller owner reference. A finalizer removes those references before allowing CR deletion, retaining the running cluster and its PVCs. There is no automatic deletion mode. Same-name resources controlled by another owner, including retained clusters, cause a reconciliation error. During namespace deletion Kubernetes removes namespaced resources independently; backups remain necessary.
+Every managed child has a controller owner reference. The retain finalizer detaches those references during CR deletion. Use orphan propagation to keep the cluster, endpoint and PVCs available after deleting the CR. Foreground garbage collection can begin deleting children before the finalizer detaches them. Same-name resources that the CR does not control, including retained clusters, cause a reconciliation error. During namespace deletion Kubernetes removes namespaced resources independently.
 
 Deleting the controller prevents new reconciliation while StatefulSet recovery continues. Keep the controller running until requested CR finalization has completed. The operator image uses leader election and namespace-scoped RBAC. It can read namespace Secrets and create pod workloads, so permission to write NatsCluster resources implies meaningful execution privileges in that namespace.
 

@@ -220,8 +220,25 @@ func TestMemoryPolicyIsPerProcessAndOptIn(t *testing.T) {
 	cluster.Spec.GoMemoryLimitPercent, cluster.Spec.GoGCPercent = &percent, &gc
 	cluster.Spec.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}
 	values := env()
-	if values["GOMEMLIMIT"] != "858993440B" || values["GOGC"] != "75" {
+	if values["GOMEMLIMIT"] != "858993459B" || values["GOGC"] != "75" {
 		t.Fatalf("incorrect process memory policy: %v", values)
+	}
+	cluster.Spec.Resources.Limits[corev1.ResourceMemory] = resource.MustParse("99")
+	if value := env()["GOMEMLIMIT"]; value != "79B" {
+		t.Fatalf("incorrect sub-100-byte policy: %s", value)
+	}
+}
+
+func TestTokenMustRoundTripAsUnquotedText(t *testing.T) {
+	for _, token := range []string{"nats_a123", "531e02fb", "123abc", "Abc+de/f="} {
+		if !validToken([]byte(token)) {
+			t.Errorf("valid synthetic token %q was rejected", token)
+		}
+	}
+	for _, token := range []string{"", "123456", "123e", "1MiB", "1.2", "1-test", "-2", "YeS", "has spaces", "a\nb", "\"quoted\"", "$other"} {
+		if validToken([]byte(token)) {
+			t.Errorf("unsupported synthetic token %q was accepted", token)
+		}
 	}
 }
 

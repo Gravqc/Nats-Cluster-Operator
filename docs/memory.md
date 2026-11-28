@@ -12,10 +12,12 @@ spec:
     limits: {cpu: "1", memory: 512Mi}
 ```
 
-`goMemoryLimitPercent` (50–95) sets `GOMEMLIMIT` in bytes using the **NATS
-container** limit. It requires a positive memory limit. The exporter has a
-separate limit. `goGCPercent` (10–500) sets `GOGC`. Both are optional and immutable
-for this API version. Existing clusters keep upstream defaults.
+`goMemoryLimitPercent` (50–95) sets `GOMEMLIMIT` from the **NATS container**
+limit, rounded down to whole bytes. The result must be at least one byte.
+The exporter has a separate limit. `goGCPercent` (10–500) sets `GOGC`. Both are
+optional and immutable for this API version. Brokers without these settings
+use upstream defaults. A corrected memory value reaches existing brokers
+when their pods are next replaced.
 
 `GOGC=100` targets heap growth relative to the live heap. It does not wait for
 physical memory utilization to reach 100%. `GOMEMLIMIT` is a soft Go-runtime

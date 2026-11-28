@@ -27,9 +27,16 @@ spec:
   podMonitor: false
 ```
 
-Use the storage class available in your cluster. Omit storageClassName to use its default. The Secret must exist in the same namespace and contain a nonempty token key. Set replicas to one for a local standalone instance, or three for a replicated cluster. Three-server clusters require separate eligible workers for their pods. The optional nodeSelector and tolerations fields use Kubernetes pod scheduling syntax.
+Use the storage class available in your cluster. Omit storageClassName to use its default. The cluster name must be a lowercase DNS label beginning with a letter, with at most 40 characters. Set replicas to one for a local standalone instance, or three for a replicated cluster. Three-server clusters require separate eligible workers for their pods. The optional nodeSelector and tolerations fields use Kubernetes pod scheduling syntax.
 
-version is an exact upstream NATS server version. The operator constructs the image tag nats:<version>-alpine. storage is the persistent claim size requested for each server. A PVC request is not a portable filesystem quota; the storage provider determines enforcement. Stream retention and capacity planning remain necessary. resources applies to the NATS container. The operator also adds a pinned metrics exporter with its own small resource requests. podMonitor requires the upstream monitoring CRD before creation. Configure Prometheus to select the emitted monitor.
+The Secret must exist in the same namespace and contain a `token` key. For a
+new cluster, use `nats_` followed by random hexadecimal characters as in the
+quickstart. Other supported tokens start with an ASCII letter, digit or
+underscore and use only ASCII letters, digits or the characters `_+./=-`.
+The operator rejects numeric forms and NATS boolean literals. Previously
+healthy clusters can continue using their existing tokens.
+
+version is an exact upstream NATS server version with canonical minor and patch components. For example, use 2.15.4 without a leading zero on the patch. The operator constructs the image tag nats:<version>-alpine. storage is the persistent claim size requested for each server. A PVC request is not a portable filesystem quota; the storage provider determines enforcement. Stream retention and capacity planning remain necessary. resources applies to the NATS container. The operator also adds a pinned metrics exporter with its own small resource requests. podMonitor requires the upstream monitoring CRD before creation. Configure Prometheus to select the emitted monitor.
 
 Every field except version is immutable after creation. Changing the Secret contents is also outside the supported rotation workflow because credentials are read into the server environment at startup.
 
@@ -78,7 +85,7 @@ Use status.observedGeneration together with the Ready condition when observing a
 
 just stop stops the four Docker containers hosting this Kind lab and preserves their storage. just up starts them again and reapplies the local installation. just down deletes the whole disposable Kubernetes cluster and its local data. Other Docker projects and Kubernetes clusters are outside these commands.
 
-Deleting an individual NatsCluster retains its workloads and disks by design. A later CR with the same name does not adopt them automatically. Keep the controller running until finalization completes. See migration.md for ownership and data-transition details.
+Use `--cascade=orphan` when deleting a NatsCluster to keep its running workload, endpoint and disks. A later CR with the same name does not adopt them automatically. Keep the controller running until finalization completes. See migration.md for ownership and data-transition details.
 
 ## Troubleshooting
 
@@ -86,6 +93,7 @@ Deleting an individual NatsCluster retains its workloads and disks by design. A 
 - Connection refused after just stop. Run just up and wait for the API server and cluster readiness.
 - Pending pods. Check PVC binding, the storage class, free CPU/memory, node selectors, tolerations and the required spread across workers.
 - CredentialsMissing. Confirm the referenced Secret name and its token key in the managed namespace. Keep the token out of logs and issue reports.
+- CredentialsInvalid. Generate a token in the supported format and update the referenced Secret before provisioning. Keep the token out of logs and issue reports.
 - PodMonitor reconciliation fails. Install the upstream PodMonitor CRD before setting podMonitor to true.
 - Upgrade is blocked. Inspect the condition message, pod readiness and NATS monitoring. Restore replica health and allow the controller to observe recovery.
 - Existing resources conflict. Provision with a new cluster name. Automatic resource adoption is outside the current implementation.

@@ -54,8 +54,8 @@ spec:
             description: NatsClusterSpec describes an independent NATS cluster.
             properties:
               credentialsSecret:
-                description: CredentialsSecret must contain a nonempty token key in
-                  this namespace.
+                description: CredentialsSecret must contain a token key that NATS
+                  parses as unquoted text.
                 minLength: 1
                 type: string
               goGCPercent:
@@ -196,7 +196,7 @@ spec:
                 type: array
               version:
                 description: Version pins an exact upstream nats-server image tag.
-                pattern: ^2\.[0-9]+\.[0-9]+$
+                pattern: ^2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$
                 type: string
             required:
             - credentialsSecret
@@ -234,10 +234,12 @@ spec:
               rule: has(self.tolerations) == has(oldSelf.tolerations) && (!has(self.tolerations)
                 || self.tolerations == oldSelf.tolerations)
             - message: Only forward patch or adjacent-minor upgrades are supported.
-              rule: self.version.split('.')[0] == oldSelf.version.split('.')[0] &&
-                ((self.version.split('.')[1] == oldSelf.version.split('.')[1] && int(self.version.split('.')[2])
-                >= int(oldSelf.version.split('.')[2])) || int(self.version.split('.')[1])
-                == int(oldSelf.version.split('.')[1]) + 1)
+              rule: '!oldSelf.version.matches(''^2[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'')
+                || (self.version.split(''.'')[0] == oldSelf.version.split(''.'')[0]
+                && ((self.version.split(''.'')[1] == oldSelf.version.split(''.'')[1]
+                && int(self.version.split(''.'')[2]) >= int(oldSelf.version.split(''.'')[2]))
+                || int(self.version.split(''.'')[1]) == int(oldSelf.version.split(''.'')[1])
+                + 1))'
           status:
             properties:
               appliedVersion:
@@ -348,6 +350,9 @@ spec:
         x-kubernetes-validations:
         - message: Cluster name must contain at most 40 characters.
           rule: size(self.metadata.name) <= 40
+        - message: Cluster name must be a DNS label beginning with a lowercase letter.
+          optionalOldSelf: true
+          rule: oldSelf.hasValue() || self.metadata.name.matches('^[a-z]([-a-z0-9]*[a-z0-9])?$')
         - message: Wait for the current upgrade to finish before changing version
             again.
           rule: '!has(oldSelf.status) || !has(oldSelf.status.upgradeVersion) || self.spec.version
@@ -356,6 +361,11 @@ spec:
           rule: self.spec.version == oldSelf.spec.version || !has(oldSelf.status)
             || !has(oldSelf.status.appliedVersion) || int(self.spec.version.split('.')[1])
             <= int(oldSelf.status.appliedVersion.split('.')[1]) + 1
+        - message: Restore the last healthy version before upgrading from a malformed
+            version.
+          rule: self.spec.version == oldSelf.spec.version || oldSelf.spec.version.matches('^2[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$')
+            || !has(oldSelf.status) || !has(oldSelf.status.appliedVersion) || self.spec.version
+            == oldSelf.status.appliedVersion
     served: true
     storage: true
     subresources:

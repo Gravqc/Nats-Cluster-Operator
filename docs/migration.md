@@ -10,7 +10,14 @@ Begin with a separate operator-managed cluster. Existing Helm resources are neve
 
 An in-place ownership handoff is future work. It must preserve server identity, PVC bindings, config paths and immutable Service/StatefulSet fields, pause the previous GitOps owner, transfer owner references, and survive interruption with rollback. Deleting a StatefulSet with orphan propagation is only one step of that migration. It is not sufficient evidence that a running deployment can be adopted safely.
 
-Deleting a NatsCluster in v0.1 retains its StatefulSet, Services, ConfigMap, PDB, NetworkPolicy and optional PodMonitor. This leaves a running workload that requires manual management. Recreating the CR with the same name is intentionally rejected. To completely remove a disposable evaluation, use `make local-down`; it deletes the dedicated Kind cluster and its local storage.
+To delete a NatsCluster while keeping its running workload and endpoint, use
+`kubectl -n YOUR_NAMESPACE delete natscluster YOUR_CLUSTER --cascade=orphan`.
+Keep the controller running until finalization completes. The StatefulSet,
+Services, ConfigMap, PDB, NetworkPolicy, optional PodMonitor and PVCs remain
+for manual management. Foreground cascading deletion can remove resources
+before the controller detaches them, including the client and headless
+Services. Recreating the CR with the same name does not adopt its resources.
+To remove a disposable evaluation and its local storage, use `make local-down`.
 
 ## Moving from the prototype API group
 

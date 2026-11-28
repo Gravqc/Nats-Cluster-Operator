@@ -204,3 +204,29 @@ blocked on stream health, with zero restarts during the gated window. Both
 arms verified all acknowledged payloads. Helm's 2.67-second acknowledgement
 gap was below the 5-second threshold, so the comparative result was
 inconclusive.
+
+## Audit follow-up — 2026-11-28
+
+On Kind v0.33.0 with Kubernetes v1.35.8, all ten lifecycle checks passed.
+Orphan deletion preserved both Service UIDs and let a client publish a new
+message through the retained endpoint. Verification read the 100 original
+payloads plus the new message. Foreground cascading deletion can still remove
+the endpoint. See [the supported retention workflow](migration.md).
+
+The API rejected dotted and digit-leading cluster names and a leading-zero
+version patch. An isolated CRD upgrade test verified that a previously
+admitted invalid name can still finalize and that a stored malformed version
+can be repaired to its last healthy version. Invalid numeric and whitespace
+tokens reported `CredentialsInvalid` before provisioning. A corrected
+Secret recovered, and an existing healthy broker kept its token and pod UID
+through a controller update.
+
+The 99-byte memory-policy fixture produced `79B` and corrected a stale
+StatefulSet template. The live 512 MiB broker reported `429496729B` at 80%.
+A terminal probe Job surfaced its failure reason and pod logs before the
+timeout. Go race tests and vet, generated CRD parity, Helm lint, nine Python
+unit tests, Ruff, and shell syntax checks passed.
+
+The pinned adjacent-minor comparison confirmed process replacement and
+verified all 1,600 payloads in each arm. Each rollout sampled at most one
+unavailable broker.

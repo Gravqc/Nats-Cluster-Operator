@@ -117,7 +117,25 @@ def probe(name, cluster_name, mode, expected=SEED_COUNT, count=None, extra=None)
 
 
 def job(name):
-    kubectl("wait", "job/" + name, "--for=condition=complete", "--timeout=360s")
+    def terminal():
+        conditions = get("job", name).get("status", {}).get("conditions", [])
+        for condition in conditions:
+            if condition["status"] != "True":
+                continue
+            if condition["type"] == "Failed":
+                logs = kubectl("logs", "job/" + name, check=False)
+                detail = " ".join(
+                    value
+                    for key in ("reason", "message")
+                    if (value := condition.get(key))
+                )
+                output = (logs.stdout or logs.stderr).strip()
+                raise RuntimeError(f"Job {name} failed. {detail}\n{output}".rstrip())
+        return any(
+            c["type"] == "Complete" and c["status"] == "True" for c in conditions
+        )
+
+    wait(terminal, "waiting for Job " + name, seconds=360)
     logs = kubectl("logs", "job/" + name).stdout.strip()
     REPORT.setdefault("probeResults", {})[name] = json.loads(logs)
 
@@ -185,6 +203,20 @@ def run():
             "json",
         ).stdout
     )
+    for name in ("dotted.name", "1leading-digit"):
+        monitored["metadata"]["name"] = name
+        rejected = kubectl(
+            "create",
+            "--dry-run=server",
+            "-f",
+            "-",
+            payload=json.dumps(monitored),
+            check=False,
+        )
+        if rejected.returncode == 0 or "DNS label" not in rejected.stderr:
+            raise RuntimeError(
+                f"Expected DNS label validation for {name}: {rejected.stderr}"
+            )
     monitored["metadata"]["name"] = "monitored"
     monitored["spec"]["podMonitor"] = True
     kubectl("apply", "-f", "-", payload=json.dumps(monitored))
@@ -197,6 +229,18 @@ def run():
         raise RuntimeError("PodMonitor selector crosses cluster boundary")
     record("podmonitor_accepted_by_upstream_CRD")
     cluster("platform")
+    rejected = kubectl(
+        "patch",
+        "natscluster/platform",
+        "--dry-run=server",
+        "--type=merge",
+        "-p",
+        '{"spec":{"version":"2.15.03"}}',
+        check=False,
+    )
+    if rejected.returncode == 0 or "spec.version" not in rejected.stderr:
+        raise RuntimeError("Expected canonical version validation: " + rejected.stderr)
+    record("invalid_names_and_version_spelling_rejected")
     cluster("other")
     record("two_independent_clusters_ready_from_monitoring")
     for cluster_name in ["platform", "other"]:
@@ -295,10 +339,25 @@ def run():
     probe("verify-recovery", "platform", "verify", SEED_COUNT + PATCH_LOAD_COUNT)
     job("verify-recovery")
     record("pod_recovery_preserves_messages")
-    kubectl("delete", "natscluster/other", "--wait=true", "--timeout=60s")
+    services = {
+        name: get("service", name)["metadata"]["uid"]
+        for name in ("other", "other-headless")
+    }
+    kubectl(
+        "delete",
+        "natscluster/other",
+        "--cascade=orphan",
+        "--wait=true",
+        "--timeout=60s",
+    )
     if len(get("statefulset", "other")["metadata"].get("ownerReferences", [])):
         raise RuntimeError("Retained StatefulSet still has owner reference")
-    probe("verify-retained", "other", "verify", 100)
+    for name, uid in services.items():
+        if get("service", name)["metadata"]["uid"] != uid:
+            raise RuntimeError("Retained Service identity changed for " + name)
+    probe("publish-retained", "other", "load", count=1)
+    job("publish-retained")
+    probe("verify-retained", "other", "verify", SEED_COUNT + 1)
     job("verify-retained")
     record("cluster_deletion_retains_running_workload_and_data")
 

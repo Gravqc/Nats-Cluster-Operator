@@ -73,6 +73,7 @@ def main():
         .removesuffix("B")
     )
     assert report["gomemlimit"] == limit, report
+    assert limit == 512 * (1 << 20) * 80 // 100, limit
     assert (
         kube(
             "exec", "memory-policy-0", "-c", "nats", "--", "printenv", "GOGC"

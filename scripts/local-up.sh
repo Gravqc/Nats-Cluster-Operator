@@ -55,7 +55,7 @@ if [[ "$restart_controller" == true ]]; then
   kubectl --context kind-nats-operator-dev -n nats-demo rollout restart deployment/nats-operator
 fi
 if ! kubectl --context kind-nats-operator-dev -n nats-demo get secret nats-auth >/dev/null 2>&1; then
-  token=$(openssl rand -hex 24)
+  token="nats_$(openssl rand -hex 24)"
   kubectl --context kind-nats-operator-dev -n nats-demo create secret generic nats-auth --from-literal="token=$token"
 fi
 kubectl --context kind-nats-operator-dev -n nats-demo apply -f examples/local.yaml

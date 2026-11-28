@@ -34,7 +34,7 @@ scope. This is an independent project, separate from the
 - A token Secret supplied by the user. Same-namespace client access by default.
 - Status from `/healthz`, `/varz` and `/jsz`, including versions, connections and metadata leader.
 - Forward patch or adjacent-minor upgrades. Before each deliberate restart, all observed replicas must be current and every pod Ready. Metadata leader is considered last. The controller waits for ten seconds of observed stability between restarts.
-- CR deletion retains workloads and disks. Recreating the CR does not automatically adopt retained resources.
+- Delete a CR with `--cascade=orphan` to retain its running workload, endpoint and disks. Recreating the CR does not automatically adopt retained resources.
 
 The alpha uses token authentication over a trusted network. Client and route
 TLS, scaling, storage expansion, and in-place Helm adoption are outside its
@@ -72,7 +72,8 @@ Clients on the host then use `nats://127.0.0.1:14222` with the token in the `nat
 The following uses a source checkout and an operator image you have already
 built and pushed to a registry your workers can pull from. Use Helm 3, kubectl,
 OpenSSL, and a storage class that can provision PVCs. The HA example requires
-three eligible workers. See [the release checklist](docs/releasing.md) for the
+three eligible workers. Use Kubernetes 1.33 or later for CRD validation
+ratcheting with default feature gates. See [the release checklist](docs/releasing.md) for the
 planned packaged install and [evaluation](docs/evaluation.md) for the Kubernetes
 and NATS versions exercised so far.
 
@@ -90,7 +91,7 @@ helm upgrade --install nats-operator ./charts/nats-cluster-operator \
 From the checkout, run:
 
 ```sh
-export NATS_TOKEN="$(openssl rand -hex 24)"
+export NATS_TOKEN="nats_$(openssl rand -hex 24)"
 kubectl -n messaging create secret generic nats-auth --from-literal=token="$NATS_TOKEN"
 kubectl -n messaging apply -f examples/ha.yaml
 kubectl -n messaging wait natscluster/platform --for=condition=Ready --timeout=240s
@@ -103,8 +104,8 @@ port-forward for a client outside Kubernetes.
 
 The controller watches its installation namespace and uses namespace-scoped RBAC. Use one installation per namespace. Different clusters in one namespace use distinct names and can share workers. PodMonitor requires `monitoring.coreos.com/v1` to be installed first; set `spec.podMonitor: true` when initially creating the cluster, and configure Prometheus to select it.
 
-**Before cleanup:** Deleting a `NatsCluster` leaves its brokers and disks
-running. Follow the [migration and retention guide](docs/migration.md) before
+**Before cleanup:** Use orphan deletion to leave a `NatsCluster`'s brokers,
+endpoint and disks in place. Follow the [migration and retention guide](docs/migration.md) before
 removing a deployment you want to preserve.
 
 CRDs under Helm's `crds/` directory install on first install and are retained on uninstall. Apply the versioned generated CRD explicitly before upgrading a controller release that changes its API. Deleting the namespace or CRD is destructive and bypasses the normal retained-workload workflow. See [migration](docs/migration.md).
