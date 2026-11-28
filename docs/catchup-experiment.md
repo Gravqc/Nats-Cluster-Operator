@@ -59,7 +59,7 @@ claims. Trials run one after the other, never concurrently.
   stream replica. A restart is a pod becoming terminating or getting a new UID.
   Its state is taken from the last sample before that transition.
 - Publisher acknowledgement gaps over 1 second, with wall-clock start and end.
-  They are split into the control window, the gated window and the rest. The
+  Each window counts the portion of a gap that overlaps it. The
   **attributed gap** is the longest gap overlapping the first restart's
   outage, from the first terminating sample to the replacement becoming
   Ready. It counts only if the publisher's pod kept its UID throughout.
@@ -96,6 +96,14 @@ operator code changes on the strength of this experiment unless a trial shows
 the operator itself misbehaving. One trial per method cannot establish a
 statistical difference. It can only show that this mechanism exists on one
 Docker host.
+
+The harness now also requires the chart's first restart to follow a sample
+with all three pods Ready and the throttled replica behind. The operator must
+show zero restarts during the gated window and at least one sample with all
+three pods Ready, a lagging replica, and `HealthGateBlocked` reporting an
+unhealthy stream replica for the requested upgrade. The publisher must
+cover both measurement windows. These checks were added after the November
+24 trials.
 
 ## Results — 2026-11-24
 
@@ -160,3 +168,17 @@ python3 tests/catchup_comparison.py
 ```
 
 Results are written to `.state/catchup-comparison.json`.
+
+### Rerun with stricter checks — 2026-11-28
+
+The operator reported an unhealthy stream replica in 34 samples where all
+three pods were Ready and the throttled follower was behind. It restarted
+zero brokers during the gated window and completed the rollout after the
+throttle was removed. Its longest acknowledgement gap inside the gated
+window was 1.77 seconds, within the 2-second bound.
+
+The chart's first restart followed a sample with a Ready but lagging replica.
+Its longest overlapping acknowledgement gap was 2.33 seconds, below the
+original 5-second threshold. Both arms verified every acknowledged payload
+(54,801 including seeds for the chart and 56,241 for the operator). The
+comparative result is **inconclusive** under the original gap threshold.

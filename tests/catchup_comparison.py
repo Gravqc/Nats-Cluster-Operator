@@ -117,11 +117,38 @@ def sample(name):
         },
     }
     if name == NAMES[1]:
-        conditions = get("natscluster", name).get("status", {}).get("conditions", [])
-        observation["reason"] = next(
-            (c["reason"] for c in conditions if c["type"] == "Ready"), None
+        cluster = get("natscluster", name)
+        conditions = cluster.get("status", {}).get("conditions", [])
+        condition = next(
+            (
+                c
+                for c in conditions
+                if c["type"] == "Ready"
+                and c.get("observedGeneration") == cluster["metadata"]["generation"]
+            ),
+            {},
         )
+        observation["reason"] = condition.get("reason")
+        observation["message"] = condition.get("message", "")
     return observation
+
+
+def ready_with_lag(observation, lagging):
+    servers = observation["pods"]
+    replica = observation["stream"]["replicas"].get(lagging)
+    return (
+        len(servers) == 3
+        and all(p["ready"] and not p["terminating"] for p in servers.values())
+        and replica is not None
+        and not replica["current"]
+        and not replica["offline"]
+        and replica["lag"] > 0
+    )
+
+
+def longest_gap(gaps, start, end):
+    overlaps = (min(g["end"], end) - max(g["start"], start) for g in gaps)
+    return max(0.0, max(overlaps, default=0.0))
 
 
 def sample_for(name, seconds, samples):
@@ -230,7 +257,7 @@ def create(name, version):
     kubectl("apply", "-f", "-", payload=json.dumps(obj))
 
 
-def restarts(samples):
+def restarts(samples, lagging):
     events = []
     for before, after in zip(samples, samples[1:]):
         for pod, state in before["pods"].items():
@@ -243,6 +270,7 @@ def restarts(samples):
                         "pod": pod,
                         "at": after["at"],
                         "streamAllCurrentBefore": before["stream"]["allCurrent"],
+                        "readyWithLagBefore": ready_with_lag(before, lagging),
                         "replicasBefore": before["stream"]["replicas"],
                         "oldUID": state["uid"],
                     }
@@ -315,9 +343,8 @@ def evaluate(name):
         while time.time() < deadline:
             observation = sample(name)
             samples.append(observation)
-            replica = observation["stream"]["replicas"].get(lagging, {})
-            behind = observation["stream"]["leader"] == leader and not (
-                replica.get("current") and not replica.get("lag")
+            behind = observation["stream"]["leader"] == leader and ready_with_lag(
+                observation, lagging
             )
             held_since = (held_since or observation["at"]) if behind else None
             if held_since and observation["at"] - held_since >= LAG_HOLD_S:
@@ -328,6 +355,9 @@ def evaluate(name):
         assert all_ready(name), "Every server must be Ready before the upgrade"
         trial["controlStart"] = time.time()
         sample_for(name, CONTROL_S, samples)
+        assert ready_with_lag(samples[-1], lagging), (
+            "Expected a Ready but lagging replica immediately before the upgrade"
+        )
         trial["upgradeRequested"] = time.time()
         if name == NAMES[0]:
             helm(NEW, name)
@@ -365,6 +395,9 @@ def evaluate(name):
     load = json.loads(kubectl("logs", "job/load-" + name).stdout)
     offset = vm_offset_ms()
     trial["vmClockOffsetMs"] = offset
+    assert (load["started_ms"] - offset) / 1000 <= trial["controlStart"] and (
+        load["ended_ms"] - offset
+    ) / 1000 >= trial["gatedEnd"], "Publisher must cover both measurement windows"
     probe(
         "verify-" + name,
         name,
@@ -384,14 +417,11 @@ def evaluate(name):
     for g in gaps:
         g["seconds"] = g["end"] - g["start"]
 
-    def longest(start, end):
-        inside = [g["seconds"] for g in gaps if start <= g["start"] < end]
-        return max(inside, default=0.0)
-
-    gated_end = trial["upgradeRequested"] + GATED_S
-    events = restarts(samples)
-    gated_events = [e for e in events if trial["upgradeRequested"] <= e["at"]]
-    first = gated_events[0] if gated_events else None
+    requested = trial["upgradeRequested"]
+    gated_end = trial["gatedEnd"]
+    events = restarts(samples, lagging)
+    rollout_events = [e for e in events if requested <= e["at"]]
+    first = rollout_events[0] if rollout_events else None
     attributed = None
     if first:
         recovered = outage(samples, first) or trial["rolloutFinished"]
@@ -408,20 +438,23 @@ def evaluate(name):
             "pod": first["pod"],
             "outageSeconds": recovered - first["at"],
             "publisherPodStable": publisher_stable,
+            "readyWithLagBefore": first["readyWithLagBefore"],
             "longestOverlappingGapSeconds": max(overlapping, default=0.0),
         }
     # Gaps under 1 second are not recorded, so 1 second bounds a quiet control.
-    control_max = max(longest(trial["controlStart"], trial["upgradeRequested"]), 1.0)
+    control_max = max(longest_gap(gaps, trial["controlStart"], requested), 1.0)
     result = {
         "acknowledged": load["acknowledged"],
         "publish_retry_errors": load["retry_errors"],
         "max_ack_gap_seconds": load["max_gap_ms"] / 1000,
         "control_max_gap_seconds_bound": control_max,
-        "gated_max_gap_seconds": longest(trial["upgradeRequested"], gated_end),
+        "gated_max_gap_seconds": longest_gap(gaps, requested, gated_end),
         "restarts_while_replica_not_current": sum(
-            not e["streamAllCurrentBefore"] for e in gated_events
+            not e["streamAllCurrentBefore"] for e in rollout_events
         ),
-        "restarts_during_gated_window": sum(e["at"] < gated_end for e in gated_events),
+        "restarts_during_gated_window": sum(
+            e["at"] < gated_end for e in rollout_events
+        ),
         "first_restart": attributed,
         "rollout_seconds": trial["rolloutFinished"] - trial["upgradeRequested"],
         "verified_unique": verified["verified"],
@@ -430,14 +463,14 @@ def evaluate(name):
         and verified["missing"] == 0,
     }
     if name == NAMES[1]:
-        result["gated_reasons"] = sorted(
-            {
-                s.get("reason")
-                for s in samples
-                if trial["upgradeRequested"] <= s["at"] < gated_end
-            }
-            - {None}
+        gated_samples = [s for s in samples if requested <= s["at"] < gated_end]
+        result["blocked_with_ready_lag_samples"] = sum(
+            ready_with_lag(s, lagging)
+            and s["reason"] == "HealthGateBlocked"
+            and s["message"].startswith("A stream replica is unhealthy on ")
+            for s in gated_samples
         )
+        result["gated_reasons"] = sorted({s["reason"] for s in gated_samples} - {None})
     trial["gaps"] = gaps
     trial["restarts"] = events
     trial["result"] = result
@@ -448,17 +481,14 @@ def evaluate(name):
 def decide(chart, operator):
     first = chart["first_restart"] or {}
     checks = {
-        "chart_restarted_while_replica_not_current": chart[
-            "restarts_while_replica_not_current"
-        ]
-        >= 1,
+        "chart_first_restart_with_ready_lag": bool(first.get("readyWithLagBefore")),
         "chart_attributed_gap_large": bool(first.get("publisherPodStable"))
         and first.get("longestOverlappingGapSeconds", 0)
         >= max(3 * chart["control_max_gap_seconds_bound"], 5),
-        "operator_no_restart_while_not_current": operator[
-            "restarts_while_replica_not_current"
-        ]
-        == 0,
+        "operator_blocked_with_ready_lag": operator["blocked_with_ready_lag_samples"]
+        > 0,
+        "operator_no_restart_while_gated": operator["restarts_during_gated_window"] == 0
+        and operator["restarts_while_replica_not_current"] == 0,
         "operator_gated_gap_bounded": operator["gated_max_gap_seconds"]
         <= 2 * operator["control_max_gap_seconds_bound"],
         "both_integrity": chart["integrity"] and operator["integrity"],

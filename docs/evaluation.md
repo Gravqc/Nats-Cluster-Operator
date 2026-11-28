@@ -159,3 +159,26 @@ pre-registered rule, so the operator now sets these values. See
 With the settings in place, all nine e2e checks, `tests/memory.py` and
 `tests/upgrade_comparison.py` passed on a fresh lab the same day (1,600 of
 1,600 payloads verified for both methods, at most one server unavailable).
+
+## Local validation — 2026-11-28
+
+The nine lifecycle checks, memory check, and pinned minor-upgrade and process
+recovery comparison passed again in a fresh namespace on the Kind lab. Both
+comparison arms verified 1,600 payloads and had at most one sampled unavailable
+server during their rollouts.
+
+The [existing-cluster transition](lame-duck-experiment.md#existing-cluster-transition--2026-11-28)
+confirmed that a controller-only update refreshes the ConfigMap without
+restarting brokers. The running brokers used their original drain on the
+first restart. A replacement used the shorter drain on its next restart.
+All 3,556 seed and acknowledged payloads verified.
+
+The [lag rerun](catchup-experiment.md#rerun-with-stricter-checks--2026-11-28)
+observed the operator block on a Ready but lagging replica. The comparative
+result was inconclusive because the chart's acknowledgement gap was below the
+original threshold.
+
+The [1,000-client drain rerun](lame-duck-experiment.md#trade-off-rerun--2026-11-28)
+confirmed shorter rollouts, clean exits and intact payloads. The shorter
+drain exceeded the publisher-gap threshold in one run and met it in an
+isolated repeat.

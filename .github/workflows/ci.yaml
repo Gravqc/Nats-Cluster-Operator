@@ -19,8 +19,8 @@ jobs:
       - run: |
           python3 -m pip install ruff==0.11.13
           python3 -m unittest discover -s tests -p 'test_*.py'
-          ruff check tests/e2e.py tests/memory.py tests/upgrade_comparison.py tests/test_upgrade_comparison.py
-          ruff format --check tests/e2e.py tests/memory.py tests/upgrade_comparison.py tests/test_upgrade_comparison.py
+          ruff check tests
+          ruff format --check tests
   kind:
     runs-on: ubuntu-latest
     timeout-minutes: 30

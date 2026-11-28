@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -107,41 +108,45 @@ func churn() error {
 		reconnect  bool
 		at         int64
 	}
-	events := make(chan event, 1024)
+	var mu sync.Mutex
+	recording := true
 	collected := []event{}
-	done := make(chan struct{})
-	go func() {
-		for item := range events {
-			collected = append(collected, item)
+	record := func(index int, reconnect bool) {
+		at := time.Now().UnixMilli()
+		mu.Lock()
+		defer mu.Unlock()
+		if recording {
+			collected = append(collected, event{index, reconnect, at})
 		}
-		close(done)
-	}()
+	}
 	connections := make([]*nats.Conn, 0, count)
+	defer func() {
+		for _, connection := range connections {
+			connection.Close()
+		}
+	}()
 	for i := 0; i < count; i++ {
 		index := i
 		connection, err := nats.Connect(os.Getenv("NATS_URL"), nats.Token(os.Getenv("NATS_TOKEN")), nats.MaxReconnects(-1),
-			nats.DisconnectErrHandler(func(*nats.Conn, error) { events <- event{index, false, time.Now().UnixMilli()} }),
-			nats.ReconnectHandler(func(*nats.Conn) { events <- event{index, true, time.Now().UnixMilli()} }))
+			nats.NoCallbacksAfterClientClose(),
+			nats.DisconnectErrHandler(func(*nats.Conn, error) { record(index, false) }),
+			nats.ReconnectHandler(func(*nats.Conn) { record(index, true) }))
 		if err != nil {
 			return fmt.Errorf("connection %d: %w", i, err)
 		}
 		connections = append(connections, connection)
 	}
 	time.Sleep(time.Duration(seconds) * time.Second)
+	// Freeze the samples before teardown. Already queued callbacks may still run.
+	mu.Lock()
+	recording = false
+	mu.Unlock()
 	stillDisconnected := 0
 	for _, connection := range connections {
 		if !connection.IsConnected() {
 			stillDisconnected++
 		}
-		// Stop callbacks before closing so shutdown is not counted as an eviction.
-		connection.SetDisconnectErrHandler(nil)
-		connection.SetReconnectHandler(nil)
-		connection.Close()
 	}
-	// Let callbacks already dispatched before the handlers were cleared finish.
-	time.Sleep(time.Second)
-	close(events)
-	<-done
 	pending := map[int]int64{}
 	durations := []int64{}
 	perSecond := map[int64]int{}

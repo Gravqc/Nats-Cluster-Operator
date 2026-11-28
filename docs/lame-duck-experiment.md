@@ -105,9 +105,17 @@ What remains true, and was not measured:
   duration would shorten that and concentrate reconnections. That is a
   trade-off for the maintainer, not a defect.
 
-Reproduce from a fresh lab after `just up`:
+Reproduce from a fresh lab after `just up`. Switch the controller to the
+baseline build first. The probe jobs still use the current quickstart image.
 
 ```sh
+git archive ee10389 Dockerfile go.mod go.sum api cmd internal |
+  docker build -t nats-cluster-operator:transition-baseline -
+kind load docker-image nats-cluster-operator:transition-baseline --name nats-operator-dev
+export KUBECONFIG="$PWD/.state/kubeconfig"
+kubectl --context kind-nats-operator-dev -n nats-demo set image deployment/nats-operator \
+  operator=nats-cluster-operator:transition-baseline
+kubectl --context kind-nats-operator-dev -n nats-demo rollout status deployment/nats-operator --timeout=180s
 python3 tests/lameduck.py baseline
 ```
 
@@ -209,14 +217,50 @@ operator now writes these two settings into every cluster's configuration.
 The expected cost showed up as a burstier reconnect rate: 60 per second
 against 13. At 1,000 clients on one host, that had no measured effect on
 reconnect latency or on the publisher. The test did not cover much larger
-client counts, servers under heavy load, clients with authentication callouts,
-or the transition for existing clusters. Servers read lame-duck settings at
-startup, so an existing cluster's first rollout after an operator upgrade is
-expected to use its previous timing. That was not tested.
+client counts, servers under heavy load or clients with authentication
+callouts. A separate run below tested the transition for existing clusters.
 
-Reproduce each arm on its own fresh lab after `just up`:
+Reproduce each arm on its own fresh lab after `just up`. Switch the
+controller to the baseline build as shown above for arm A. Use the quickstart
+controller for arm B.
 
 ```sh
 python3 tests/lameduck_tradeoff.py A   # on a build without the settings
 python3 tests/lameduck_tradeoff.py B   # on the current build
 ```
+
+### Trade-off rerun — 2026-11-28
+
+With the updated reconnect probe, the baseline rollout took 279 seconds and
+the short-drain rollout took 104 seconds. All six broker exits were clean.
+Every client reconnected and both arms verified all acknowledged payloads.
+The short-drain arm peaked at 59 reconnects per second at 3 ms p99, compared
+with 13 per second at 10 ms p99 for the baseline.
+
+The short-drain arm had one publisher retry and a 3.22-second acknowledgement
+gap during the final broker's drain. The gap exceeded the 1.62-second limit
+derived from the baseline's 0.62-second gap under the original decision rule.
+The probe's publish timeout is three seconds, and its samples do not establish
+how long the server-side delay lasted.
+
+An isolated repeat of the short-drain arm finished in 106 seconds, with
+three clean 24-second exits and all clients reconnected. The maximum
+acknowledgement gap was 0.71 seconds, with zero retries and all 25,857 seed and
+acknowledged payloads verified. This repeat met the timing thresholds against
+the same baseline. The two short-drain runs give mixed evidence on the
+publisher gap.
+
+## Existing-cluster transition — 2026-11-28
+
+A three-broker NATS 2.15.2 cluster started with controller `ee10389` in a
+fresh namespace on the Kind lab. The controller-only update added the timing
+settings to the ConfigMap, preserved all broker UIDs, and left the 100 seed
+payloads readable.
+
+Next, a guarded patch upgrade to 2.15.3 replaced all three brokers. Each
+original broker held 300 clients and exited cleanly after 79–81 seconds,
+using its startup settings. A subsequent deliberate restart of one replacement
+broker with 300 clients exited cleanly in 24 seconds. The first client closed
+after 11.9 seconds and all 300 closed. The publisher acknowledged 3,456
+messages during the test with zero retries. Verification found every seed and
+acknowledged payload after the rollout and subsequent restart.
