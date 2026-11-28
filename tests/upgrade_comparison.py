@@ -12,7 +12,7 @@ import subprocess
 import time
 import urllib.request
 
-from e2e import ROOT, SEED_COUNT, get, job, kubectl, probe, ready, wait
+from e2e import NATS_CLUSTER, ROOT, SEED_COUNT, get, job, kubectl, probe, ready, wait
 
 OLD = "2.11.14"
 NEW = "2.12.5"
@@ -228,13 +228,13 @@ def evaluate(name):
     else:
         kubectl(
             "patch",
-            "natscluster/" + name,
+            f"{NATS_CLUSTER}/{name}",
             "--type=merge",
             "-p",
             json.dumps({"spec": {"version": NEW}}),
         )
         wait(
-            lambda: get("natscluster", name).get("status", {}).get("upgradeVersion")
+            lambda: get(NATS_CLUSTER, name).get("status", {}).get("upgradeVersion")
             == NEW,
             "waiting for durable upgrade intent",
         )
@@ -242,7 +242,7 @@ def evaluate(name):
         # minor, while a rollout is in progress.
         rejected = kubectl(
             "patch",
-            "natscluster/" + name,
+            f"{NATS_CLUSTER}/{name}",
             "--dry-run=server",
             "--type=merge",
             "-p",
@@ -366,7 +366,7 @@ def verify_admission_baseline():
     # rollout. The recorded healthy version must also constrain the next target.
     name = "comparison-admission"
     secret = "comparison-deliberately-missing"
-    assert kubectl("get", "natscluster/" + name, check=False).returncode != 0
+    assert kubectl("get", f"{NATS_CLUSTER}/{name}", check=False).returncode != 0
     assert kubectl("get", "secret/" + secret, check=False).returncode != 0
     obj = json.loads(
         kubectl(
@@ -391,7 +391,7 @@ def verify_admission_baseline():
     try:
         kubectl(
             "patch",
-            "natscluster/" + name,
+            f"{NATS_CLUSTER}/{name}",
             "--subresource=status",
             "--type=merge",
             "-p",
@@ -399,7 +399,7 @@ def verify_admission_baseline():
         )
         rejected = kubectl(
             "patch",
-            "natscluster/" + name,
+            f"{NATS_CLUSTER}/{name}",
             "--dry-run=server",
             "--type=merge",
             "-p",
@@ -412,7 +412,7 @@ def verify_admission_baseline():
         assert kubectl("get", "statefulset/" + name, check=False).returncode != 0
         REPORT["rapid_minor_skip_rejected"] = True
     finally:
-        kubectl("delete", "natscluster/" + name, "--wait=true", "--timeout=60s")
+        kubectl("delete", f"{NATS_CLUSTER}/{name}", "--wait=true", "--timeout=60s")
 
 
 def main():
@@ -453,11 +453,11 @@ def main():
     for name in NAMES:
         observation = sample(name)
         assert observation["leader"] and observation["unavailable"] == 0, observation
-    assert get("natscluster", NAMES[1])["status"]["appliedVersion"] == OLD
+    assert get(NATS_CLUSTER, NAMES[1])["status"]["appliedVersion"] == OLD
     # Run sequentially to avoid one rollout contending with another on this host.
     for name in NAMES:
         evaluate(name)
-    assert get("natscluster", NAMES[1])["status"]["appliedVersion"] == NEW
+    assert get(NATS_CLUSTER, NAMES[1])["status"]["appliedVersion"] == NEW
     REPORT["completed"] = True
 
 

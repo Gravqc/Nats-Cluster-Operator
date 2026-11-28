@@ -29,14 +29,27 @@ spec:
 
 Use the storage class available in your cluster. Omit storageClassName to use its default. The cluster name must be a lowercase DNS label beginning with a letter, with at most 40 characters. Set replicas to one for a local standalone instance, or three for a replicated cluster. Three-server clusters require separate eligible workers for their pods. The optional nodeSelector and tolerations fields use Kubernetes pod scheduling syntax.
 
-The Secret must exist in the same namespace and contain a `token` key. For a
-new cluster, use `nats_` followed by random hexadecimal characters as in the
+The Secret must exist in the same namespace and contain a `token` key. New
+clusters accept 1 to 3,072 bytes, leaving room for the rest of the NATS
+`CONNECT` command. Use `nats_` followed by random hexadecimal characters as in the
 quickstart. Other supported tokens start with an ASCII letter, digit or
 underscore and use only ASCII letters, digits or the characters `_+./=-`.
-The operator rejects numeric forms and NATS boolean literals. Previously
-healthy clusters can continue using their existing tokens.
+The operator rejects numeric forms and NATS boolean literals for new
+clusters. Previously healthy clusters keep their legacy format and longer
+tokens whose minimal `CONNECT` JSON argument fits the broker's 4,096-byte
+limit. Additional client fields count toward the same limit.
 
-version is an exact upstream NATS server version with canonical minor and patch components. For example, use 2.15.4 without a leading zero on the patch. The operator constructs the image tag nats:<version>-alpine. storage is the persistent claim size requested for each server. A PVC request is not a portable filesystem quota; the storage provider determines enforcement. Stream retention and capacity planning remain necessary. resources applies to the NATS container. The operator also adds a pinned metrics exporter with its own small resource requests. podMonitor requires the upstream monitoring CRD before creation. Configure Prometheus to select the emitted monitor.
+`version` is an exact upstream NATS server version of the form
+`2.<minor>.<patch>`. Minor and patch each have at most nine digits, with no
+leading zeros. For example, use `2.15.4`. The operator constructs
+`nats:<version>-alpine`. Verify image availability for your architecture
+before applying the resource.
+
+`storage` is the per-broker claim size, expressed as a positive whole number
+of `Mi`, `Gi` or `Ti`. The storage provider determines quota enforcement.
+`resources` applies to the NATS container. The metrics exporter has its own
+requests and limits. `podMonitor: true` requires the monitoring CRD at
+creation and a Prometheus installation configured to select the monitor.
 
 Every field except version is immutable after creation. Changing the Secret contents is also outside the supported rotation workflow because credentials are read into the server environment at startup.
 
@@ -48,10 +61,14 @@ Optional `goMemoryLimitPercent` and `goGCPercent` are creation-time settings. Se
 just status
 just logs
 export KUBECONFIG="$PWD/.state/kubeconfig"
-kubectl --context kind-nats-operator-dev -n nats-demo describe natscluster/local
+kubectl --context kind-nats-operator-dev -n nats-demo describe natsclusters.nats.gravqc.github.io/local
 ```
 
 status.clientURL contains the in-cluster address. status.servers reports observed server versions, connections, memory and health. status.metaLeader is available for clustered JetStream. Ready=False includes the current reason, such as CredentialsMissing, HealthGateBlocked, WaitingForPod, Stabilizing or Upgrading. Missing prerequisites can also produce ReconcileFailed. Ready=True confirms the monitored server topology and pod readiness at the last observation. Applications must provision the streams and consumers they use.
+
+Use a client connection to verify authentication and reachability from the
+application's network. Enforcement of the generated NetworkPolicy depends on
+the cluster's CNI.
 
 The default local example has one server. The monitored, platform and other workloads seen after the e2e suite are test fixtures; other remains running as part of the retained-workload deletion scenario. Completed probe Jobs can also remain in the namespace. Use a fresh lab for another evaluation run.
 
@@ -72,12 +89,35 @@ Supply NATS_URL and NATS_TOKEN through your client's connection options. The tok
 Create a separate HA example using version 2.15.2, wait until Ready, then request 2.15.3:
 
 ```sh
-kubectl --context kind-nats-operator-dev -n nats-demo patch natscluster/platform \
+kubectl --context kind-nats-operator-dev -n nats-demo patch natsclusters.nats.gravqc.github.io/platform \
   --type=merge -p '{"spec":{"version":"2.15.3"}}'
-kubectl --context kind-nats-operator-dev -n nats-demo get natscluster/platform -w
+kubectl --context kind-nats-operator-dev -n nats-demo get natsclusters.nats.gravqc.github.io/platform -w
 ```
 
-Forward patches and adjacent-minor upgrades are accepted. Downgrades, skipped minors, and overlapping version requests are rejected. The executed compatibility record covers specific version pairs, not all 2.x combinations. Check upstream release notes before selecting versions. `status.upgradeVersion` identifies an active request. There is no cancel, downgrade or forced-health override API. Version admission checks ordering. Before requesting an upgrade, confirm that the exact image can be pulled on the worker architecture and review upstream upgrade prerequisites. An unpullable image can strand the first replacement pod while the active upgrade locks the target. Recovery from that state requires administrator intervention outside the current API.
+Forward patches and adjacent-minor upgrades are accepted. Downgrades and
+skipped minors are rejected. Once the controller persists an active target
+in `status.upgradeVersion`, admission rejects a different target until the
+rollout finishes. Compatibility evidence covers the version pairs in
+[evaluation.md](evaluation.md). Check upstream release notes and image
+availability before requesting an upgrade. An unpullable image can strand
+a replacement pod while the target is locked. Recovery requires administrator
+intervention outside the upgrade API.
+
+For a resource admitted with an invalid legacy version, restore the last
+healthy canonical version shown in `status.appliedVersion` when available. An owned
+StatefulSet tag that differs only by leading zeros can be corrected to the
+equivalent canonical tag. The normal health gate still controls restarts.
+If the broker container never started and is stuck in `ErrImagePull` or
+`ImagePullBackOff`, have an administrator confirm the StatefulSet template
+is canonical and replace the failed pod while keeping its PVC. Check that
+the replacement becomes Ready and verify existing payloads.
+
+A previously admitted oversized tag has a narrower automatic recovery
+path. For an owned StatefulSet without a recorded healthy version, the
+controller can correct a scaled-down template or replace a pod in image
+pull failure when Kubernetes records no broker start. The controller keeps
+the PVCs and stops automatic recovery if it sees evidence that an outdated
+broker started. Ordinary upgrades still use the health gate.
 
 Use status.observedGeneration together with the Ready condition when observing a spec change; an immediately returned Ready condition can belong to the previous generation. The e2e script performs this check. Upgrades can wait indefinitely while replica health is uncertain. A single-server upgrade interrupts service during its restart. The controller uses OnDelete StatefulSets and coordinates individual replacement pods. Read design.md for the gate, persistence and failure model.
 
@@ -93,7 +133,8 @@ Use `--cascade=orphan` when deleting a NatsCluster to keep its running workload,
 - Connection refused after just stop. Run just up and wait for the API server and cluster readiness.
 - Pending pods. Check PVC binding, the storage class, free CPU/memory, node selectors, tolerations and the required spread across workers.
 - CredentialsMissing. Confirm the referenced Secret name and its token key in the managed namespace. Keep the token out of logs and issue reports.
-- CredentialsInvalid. Generate a token in the supported format and update the referenced Secret before provisioning. Keep the token out of logs and issue reports.
+- CredentialsInvalid. Check the token format and byte limit. Before provisioning, correct the referenced Secret and wait for reconciliation. For a running cluster, plan credential recovery separately because servers read the Secret at startup. Keep the token out of logs and issue reports.
+- InvalidVersion. Correct the legacy version in the CR before reconciliation can continue. The guarded upgrade section describes the recovery path.
 - PodMonitor reconciliation fails. Install the upstream PodMonitor CRD before setting podMonitor to true.
 - Upgrade is blocked. Inspect the condition message, pod readiness and NATS monitoring. Restore replica health and allow the controller to observe recovery.
 - Existing resources conflict. Provision with a new cluster name. Automatic resource adoption is outside the current implementation.

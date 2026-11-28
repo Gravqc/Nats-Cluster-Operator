@@ -230,6 +230,10 @@ func TestMemoryPolicyIsPerProcessAndOptIn(t *testing.T) {
 }
 
 func TestTokenMustRoundTripAsUnquotedText(t *testing.T) {
+	if !validToken([]byte(strings.Repeat("a", maxTokenBytes))) ||
+		validToken([]byte(strings.Repeat("a", maxTokenBytes+1))) {
+		t.Fatal("token byte limit is not enforced at the boundary")
+	}
 	for _, token := range []string{"nats_a123", "531e02fb", "123abc", "Abc+de/f="} {
 		if !validToken([]byte(token)) {
 			t.Errorf("valid synthetic token %q was rejected", token)
@@ -238,6 +242,19 @@ func TestTokenMustRoundTripAsUnquotedText(t *testing.T) {
 	for _, token := range []string{"", "123456", "123e", "1MiB", "1.2", "1-test", "-2", "YeS", "has spaces", "a\nb", "\"quoted\"", "$other"} {
 		if validToken([]byte(token)) {
 			t.Errorf("unsupported synthetic token %q was accepted", token)
+		}
+	}
+}
+
+func TestLegacyTokenControlLine(t *testing.T) {
+	for _, size := range []int{3200, 4075, 4079} {
+		if !legacyTokenFits([]byte(strings.Repeat("a", size))) {
+			t.Errorf("a %d-byte legacy token must fit the CONNECT argument", size)
+		}
+	}
+	for _, token := range []string{strings.Repeat("a", 4080), strings.Repeat("a", 4505), strings.Repeat("\"", 3200)} {
+		if legacyTokenFits([]byte(token)) {
+			t.Fatal("token longer than a CONNECT line was accepted")
 		}
 	}
 }
@@ -259,6 +276,52 @@ func TestUpgradeCompatibility(t *testing.T) {
 	for _, pair := range [][2]string{{"2.11.14", "2.13.0"}, {"2.12.5", "2.11.14"}, {"2.12.5", "2.12.4"}, {"2.12.5", "3.0.0"}, {"invalid", "2.12.5"}} {
 		if forwardUpgrade(pair[0], pair[1]) {
 			t.Fatal(pair)
+		}
+	}
+}
+
+func TestLegacyVersionRepairRequiresEquivalentCanonicalTarget(t *testing.T) {
+	if !sameLegacyVersion("2.015.03", "2.15.3") || !sameLegacyVersion("2.00.00", "2.0.0") {
+		t.Fatal("equivalent legacy tag could not be repaired")
+	}
+	for _, from := range []string{"2..3", "2.15.04", "2.14.03", "2.15.03-rc", "2.15.9223372036854775808"} {
+		if sameLegacyVersion(from, "2.15.3") {
+			t.Fatalf("treated %s as an equivalent legacy tag", from)
+		}
+	}
+	if sameLegacyVersion("2.15.003", "2.15.03") {
+		t.Fatal("accepted a noncanonical target")
+	}
+}
+
+func TestOversizedLegacyImageRecoveryRequiresNeverStartedBroker(t *testing.T) {
+	if !oversizedLegacyImage("nats:2.15.1000000000-alpine") {
+		t.Fatal("oversized legacy tag was not recognized")
+	}
+	for _, image := range []string{"other:2.15.1000000000-alpine", "nats:2.15.0000000003-alpine", "nats:2.15.3-alpine"} {
+		if oversizedLegacyImage(image) {
+			t.Fatalf("ordinary image %s entered legacy recovery", image)
+		}
+	}
+	pod := corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodPending}}
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: "nats", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff"}},
+	}}
+	if !neverStartedPullFailure(&pod) {
+		t.Fatal("unstarted broker with an image pull error was not recognized")
+	}
+	for field, mutate := range map[string]func(*corev1.ContainerStatus){
+		"container ID": func(status *corev1.ContainerStatus) { status.ContainerID = "containerd://old" },
+		"image ID":     func(status *corev1.ContainerStatus) { status.ImageID = "sha256:old" },
+		"restart":      func(status *corev1.ContainerStatus) { status.RestartCount = 1 },
+		"termination": func(status *corev1.ContainerStatus) {
+			status.LastTerminationState.Terminated = &corev1.ContainerStateTerminated{}
+		},
+	} {
+		previouslyStarted := pod.DeepCopy()
+		mutate(&previouslyStarted.Status.ContainerStatuses[0])
+		if neverStartedPullFailure(previouslyStarted) {
+			t.Errorf("pod with recorded %s entered legacy recovery", field)
 		}
 	}
 }

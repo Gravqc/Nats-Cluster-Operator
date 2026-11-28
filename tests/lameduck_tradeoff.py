@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from e2e import ROOT, SEED_COUNT, get, job, kubectl, probe, ready, wait
+from e2e import NATS_CLUSTER, ROOT, SEED_COUNT, get, job, kubectl, probe, ready, wait
 from upgrade_comparison import pod_ready, pods
 
 ARM = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -165,7 +165,7 @@ def main():
     started = time.time()
     kubectl(
         "patch",
-        "natscluster/" + NAME,
+        f"{NATS_CLUSTER}/{NAME}",
         "--type=merge",
         "-p",
         json.dumps({"spec": {"version": NEW}}),

@@ -11,7 +11,7 @@ Begin with a separate operator-managed cluster. Existing Helm resources are neve
 An in-place ownership handoff is future work. It must preserve server identity, PVC bindings, config paths and immutable Service/StatefulSet fields, pause the previous GitOps owner, transfer owner references, and survive interruption with rollback. Deleting a StatefulSet with orphan propagation is only one step of that migration. It is not sufficient evidence that a running deployment can be adopted safely.
 
 To delete a NatsCluster while keeping its running workload and endpoint, use
-`kubectl -n YOUR_NAMESPACE delete natscluster YOUR_CLUSTER --cascade=orphan`.
+`kubectl -n YOUR_NAMESPACE delete natsclusters.nats.gravqc.github.io YOUR_CLUSTER --cascade=orphan`.
 Keep the controller running until finalization completes. The StatefulSet,
 Services, ConfigMap, PDB, NetworkPolicy, optional PodMonitor and PVCs remain
 for manual management. Foreground cascading deletion can remove resources

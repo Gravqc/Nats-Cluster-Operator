@@ -230,3 +230,77 @@ unit tests, Ruff, and shell syntax checks passed.
 The pinned adjacent-minor comparison confirmed process replacement and
 verified all 1,600 payloads in each arm. Each rollout sampled at most one
 unavailable broker.
+
+## Legacy version and token limits — 2026-11-28
+
+On Kind v0.33.0 with Kubernetes v1.35.8, the updated CRD rejected new
+overflowing version values. An isolated CRD upgrade allowed repair of a stored
+oversized value and finalizer removal during orphan deletion with the old
+spec unchanged.
+
+The controller corrected a zero-padded StatefulSet tag on a healthy
+standalone cluster while preserving the broker UID and PVC. In a separate
+image-pull failure on that fixture, it corrected the template and kept the
+health gate active. An administrator then replaced the never-started pod,
+which became Ready on the original PVC. Both checks verified the 100 seed
+payloads through the client Service.
+
+A 4,505-byte token was rejected before provisioning, including when the CR
+carried a previously applied version. A real authenticated client published
+with a token at the 3,072-byte limit on NATS 2.11.14, 2.12.5, and 2.15.3.
+
+All ten lifecycle checks and the memory-policy check passed. Both
+adjacent-minor trials confirmed process replacement and verified all 1,600
+payloads each. Each rollout sampled at most one unavailable broker.
+Go race tests and vet, generated CRD parity, Helm lint, nine Python unit
+tests, and Ruff passed.
+
+## Legacy recovery and compatibility recheck — 2026-11-28
+
+On Kind v0.33.0 with Kubernetes v1.35.8, the controller corrected an
+oversized tag on a synthetic owned StatefulSet with zero replicas. In a
+separate fixture, the kubelet reported an image-pull failure for the
+oversized image. The controller replaced the never-started broker and
+kept its PVC UID. An authenticated client then wrote and read all 100
+test payloads through the cluster Service. The controller left an
+oversized template in place when the resource recorded a previously
+healthy version.
+
+A real standalone cluster with a 3,200-byte token kept its broker UID
+through the controller update. A NATS 2.15.2 to 2.15.3 patch then replaced
+the broker, kept the PVC UID, and verified all 100 seed payloads with the
+original token. A new cluster rejected the same token length, and a
+4,505-byte token was rejected even with a recorded healthy version.
+
+All ten lifecycle checks and the memory-policy check passed with a second
+CRD exposing the same short resource names in a different API group.
+An unqualified lookup selected the competing API. The fully qualified
+lookup returned the intended resource.
+
+The NATS 2.11.14 to 2.12.5 comparison confirmed process replacement and
+verified 1,600 of 1,600 payloads in each arm. Both rollouts sampled at
+most one unavailable broker. The runtime checks ran on one Docker host.
+Go race tests and vet, generated CRD parity, Helm lint, nine Python unit
+tests, and Ruff passed.
+
+## Alpha token boundary and quickstart — 2026-11-28
+
+On Kind, raw NATS clients authenticated after a controller update with
+4,075-byte and 4,079-byte legacy tokens. Their `CONNECT` JSON arguments were
+4,092 and 4,096 bytes. NATS rejected the 4,097-byte argument for a
+4,080-byte token, and the controller reported `CredentialsInvalid`.
+The 4,075-byte token also authenticated after a broker patch from 2.15.2 to
+2.15.3 that kept the original PVC.
+
+With a competing CRD installed, the short name resolved to the competing
+API. The fully qualified quickstart `get` and `wait` commands reached the
+intended cluster.
+
+All ten lifecycle checks and the memory-policy check passed on the same
+Kind host. The patch and pod recovery verified 1,000 payloads, and orphan
+deletion verified 101 payloads, including a new publish after deletion.
+Both adjacent-minor comparison arms confirmed process replacement and
+verified all 1,600 payloads, with at most one sampled unavailable broker.
+The Helm publisher recorded zero retry errors and the operator publisher
+recorded six. Go race tests and vet, CRD parity, Helm lint and packaging,
+Python unit tests, and Ruff passed.

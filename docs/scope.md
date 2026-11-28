@@ -16,7 +16,7 @@ This is an independent personal project. There is no upstream endorsement or pro
 - Optional per-cluster PodMonitor when the Prometheus Operator CRD is installed.
 - Namespace-scoped operation, Secret references, resource requests/limits and node placement.
 - Monitoring-derived status and guarded forward patch and adjacent-minor upgrades.
-- Retention of running workloads and disks when the CR is deleted.
+- Retention of the running workload, endpoint and disks with `--cascade=orphan`. Foreground cascading deletion can remove the endpoint. See the [retention workflow](migration.md).
 - A Kind quickstart, unit/race tests and an e2e upgrade scenario with acknowledged-message verification.
 
 The clean evaluation covers one-server and three-server clusters and the 2.15.2 to 2.15.3 patch upgrade, plus the 2.11.14 to 2.12.5 minor-upgrade and hard-process-failure trials. Five-server creation is rejected until a topology-specific evaluation has been executed. The CRD supports explicit 2.x image versions; the available compatibility evidence is limited to the versions recorded in evaluation.md.
@@ -31,4 +31,4 @@ Autoscaling, connection rebalancing, safe retirement, volume expansion, credenti
 
 ## Acceptance evidence
 
-The initial acceptance conditions are cluster isolation, an observable Ready condition, a blocked upgrade during verified server unresponsiveness, at most one unavailable server during the tested rollout, preserved acknowledged payloads, recovery after controller and pod restarts, and retained data on CR deletion. The executed record and its limits are in evaluation.md.
+The initial acceptance conditions are cluster isolation, an observable Ready condition, a blocked upgrade during verified server unresponsiveness, at most one unavailable server during the tested rollout, preserved acknowledged payloads, recovery after controller and pod restarts, and retained data and connectivity after orphan deletion. The executed record and its limits are in evaluation.md.

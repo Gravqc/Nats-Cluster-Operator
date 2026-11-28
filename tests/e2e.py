@@ -10,6 +10,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 os.environ["KUBECONFIG"] = str(ROOT / ".state/kubeconfig")
 KUBE = ["kubectl", "--context", "kind-nats-operator-dev", "-n", "nats-demo"]
+NATS_CLUSTER = "natsclusters.nats.gravqc.github.io"
 SEED_COUNT = 100
 PATCH_LOAD_COUNT = 900
 REPORT = {"cluster": "nats-operator-dev", "checks": {}}
@@ -41,7 +42,7 @@ def wait(predicate, description, seconds=240):
 
 
 def ready(name):
-    cluster = get("natscluster", name)
+    cluster = get(NATS_CLUSTER, name)
     return cluster.get("status", {}).get("observedGeneration") == cluster["metadata"][
         "generation"
     ] and any(
@@ -229,17 +230,20 @@ def run():
         raise RuntimeError("PodMonitor selector crosses cluster boundary")
     record("podmonitor_accepted_by_upstream_CRD")
     cluster("platform")
-    rejected = kubectl(
-        "patch",
-        "natscluster/platform",
-        "--dry-run=server",
-        "--type=merge",
-        "-p",
-        '{"spec":{"version":"2.15.03"}}',
-        check=False,
-    )
-    if rejected.returncode == 0 or "spec.version" not in rejected.stderr:
-        raise RuntimeError("Expected canonical version validation: " + rejected.stderr)
+    for version in ("2.15.03", "2.15.9223372036854775808"):
+        rejected = kubectl(
+            "patch",
+            f"{NATS_CLUSTER}/platform",
+            "--dry-run=server",
+            "--type=merge",
+            "-p",
+            json.dumps({"spec": {"version": version}}),
+            check=False,
+        )
+        if rejected.returncode == 0 or "spec.version" not in rejected.stderr:
+            raise RuntimeError(
+                "Expected canonical version validation: " + rejected.stderr
+            )
     record("invalid_names_and_version_spelling_rejected")
     cluster("other")
     record("two_independent_clusters_ready_from_monitoring")
@@ -249,7 +253,7 @@ def run():
     record("application_provisions_R3_streams_and_receives_publish_acknowledgements")
     rejected = kubectl(
         "patch",
-        "natscluster/platform",
+        f"{NATS_CLUSTER}/platform",
         "--type=merge",
         "-p",
         '{"spec":{"replicas":1}}',
@@ -264,7 +268,7 @@ def run():
     try:
         kubectl(
             "patch",
-            "natscluster/platform",
+            f"{NATS_CLUSTER}/platform",
             "--type=merge",
             "-p",
             '{"spec":{"version":"2.15.3"}}',
@@ -274,7 +278,7 @@ def run():
             raise RuntimeError(
                 "Operator restarted a server while another was unresponsive"
             )
-        condition = get("natscluster", "platform")["status"]["conditions"][0]
+        condition = get(NATS_CLUSTER, "platform")["status"]["conditions"][0]
         if condition["status"] != "False":
             raise RuntimeError("Health gate did not report blocked status")
         record("upgrade_blocked_while_server_unhealthy")
@@ -310,9 +314,9 @@ def run():
         time.sleep(1)
     REPORT["maxUnavailableDuringUpgrade"] = max_unavailable
     job("load-upgrade")
-    if get("natscluster", "other")["spec"]["version"] != "2.15.2":
+    if get(NATS_CLUSTER, "other")["spec"]["version"] != "2.15.2":
         raise RuntimeError("Other cluster version changed")
-    for server in get("natscluster", "platform")["status"]["servers"]:
+    for server in get(NATS_CLUSTER, "platform")["status"]["servers"]:
         if server["version"] != "2.15.3":
             raise RuntimeError("Status did not observe upgraded server version")
     record("rolling_patch_upgrade_resumes_after_operator_restart")
@@ -345,7 +349,7 @@ def run():
     }
     kubectl(
         "delete",
-        "natscluster/other",
+        f"{NATS_CLUSTER}/other",
         "--cascade=orphan",
         "--wait=true",
         "--timeout=60s",

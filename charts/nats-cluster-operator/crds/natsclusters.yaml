@@ -196,7 +196,8 @@ spec:
                 type: array
               version:
                 description: Version pins an exact upstream nats-server image tag.
-                pattern: ^2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$
+                maxLength: 21
+                pattern: ^2\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$
                 type: string
             required:
             - credentialsSecret
@@ -234,12 +235,12 @@ spec:
               rule: has(self.tolerations) == has(oldSelf.tolerations) && (!has(self.tolerations)
                 || self.tolerations == oldSelf.tolerations)
             - message: Only forward patch or adjacent-minor upgrades are supported.
-              rule: '!oldSelf.version.matches(''^2[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$'')
-                || (self.version.split(''.'')[0] == oldSelf.version.split(''.'')[0]
-                && ((self.version.split(''.'')[1] == oldSelf.version.split(''.'')[1]
-                && int(self.version.split(''.'')[2]) >= int(oldSelf.version.split(''.'')[2]))
-                || int(self.version.split(''.'')[1]) == int(oldSelf.version.split(''.'')[1])
-                + 1))'
+              rule: self.version == oldSelf.version || !self.version.matches('^2[.](0|[1-9][0-9]{0,8})[.](0|[1-9][0-9]{0,8})$')
+                || !oldSelf.version.matches('^2[.](0|[1-9][0-9]{0,8})[.](0|[1-9][0-9]{0,8})$')
+                || (self.version.split('.')[0] == oldSelf.version.split('.')[0] &&
+                ((self.version.split('.')[1] == oldSelf.version.split('.')[1] && int(self.version.split('.')[2])
+                >= int(oldSelf.version.split('.')[2])) || int(self.version.split('.')[1])
+                == int(oldSelf.version.split('.')[1]) + 1))
           status:
             properties:
               appliedVersion:
@@ -359,11 +360,13 @@ spec:
             == oldSelf.spec.version'
         - message: Do not skip a minor relative to the last healthy server version.
           rule: self.spec.version == oldSelf.spec.version || !has(oldSelf.status)
-            || !has(oldSelf.status.appliedVersion) || int(self.spec.version.split('.')[1])
-            <= int(oldSelf.status.appliedVersion.split('.')[1]) + 1
+            || !has(oldSelf.status.appliedVersion) || !self.spec.version.matches('^2[.](0|[1-9][0-9]{0,8})[.](0|[1-9][0-9]{0,8})$')
+            || !oldSelf.status.appliedVersion.matches('^2[.](0|[1-9][0-9]{0,8})[.](0|[1-9][0-9]{0,8})$')
+            || int(self.spec.version.split('.')[1]) <= int(oldSelf.status.appliedVersion.split('.')[1])
+            + 1
         - message: Restore the last healthy version before upgrading from a malformed
             version.
-          rule: self.spec.version == oldSelf.spec.version || oldSelf.spec.version.matches('^2[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$')
+          rule: self.spec.version == oldSelf.spec.version || oldSelf.spec.version.matches('^2[.](0|[1-9][0-9]{0,8})[.](0|[1-9][0-9]{0,8})$')
             || !has(oldSelf.status) || !has(oldSelf.status.appliedVersion) || self.spec.version
             == oldSelf.status.appliedVersion
     served: true

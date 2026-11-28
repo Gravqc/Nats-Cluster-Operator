@@ -13,7 +13,7 @@ import subprocess
 import time
 import urllib.request
 
-from e2e import ROOT, SEED_COUNT, get, job, kubectl, probe, ready, wait
+from e2e import NATS_CLUSTER, ROOT, SEED_COUNT, get, job, kubectl, probe, ready, wait
 from upgrade_comparison import (
     CHART_SHA256,
     CHART_URL,
@@ -117,7 +117,7 @@ def sample(name):
         },
     }
     if name == NAMES[1]:
-        cluster = get("natscluster", name)
+        cluster = get(NATS_CLUSTER, name)
         conditions = cluster.get("status", {}).get("conditions", [])
         condition = next(
             (
@@ -364,7 +364,7 @@ def evaluate(name):
         else:
             kubectl(
                 "patch",
-                "natscluster/" + name,
+                f"{NATS_CLUSTER}/{name}",
                 "--type=merge",
                 "-p",
                 json.dumps({"spec": {"version": NEW}}),

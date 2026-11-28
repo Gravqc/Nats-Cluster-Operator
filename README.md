@@ -27,18 +27,19 @@ scope. This is an independent project, separate from the
 
 ## Current scope
 
-- Explicit NATS server versions, with no floating `latest` tag.
+- Canonical `2.<minor>.<patch>` server versions, with up to nine digits per component and an exact upstream image tag.
 - One server for local development, or three servers spread across workers.
 - File-backed JetStream, resource requests/limits and scheduling configuration.
 - Optional per-broker [Go memory and GC controls](docs/memory.md).
-- A token Secret supplied by the user. Same-namespace client access by default.
-- Status from `/healthz`, `/varz` and `/jsz`, including versions, connections and metadata leader.
+- A user-supplied token Secret, with a 3,072-byte limit for new clusters. Same-namespace client access by default.
+- Status from `/healthz`, `/varz` and `/jsz`, including versions, connections and metadata leader. `Ready` reports observed broker and pod health. Verify client authentication and network access separately.
 - Forward patch or adjacent-minor upgrades. Before each deliberate restart, all observed replicas must be current and every pod Ready. Metadata leader is considered last. The controller waits for ten seconds of observed stability between restarts.
-- Delete a CR with `--cascade=orphan` to retain its running workload, endpoint and disks. Recreating the CR does not automatically adopt retained resources.
+- Delete a CR with `--cascade=orphan` to retain its running workload, endpoint and disks. Foreground cascading deletion can remove the endpoint. Recreating the CR does not automatically adopt retained resources.
 
 The alpha uses token authentication over a trusted network. Client and route
 TLS, scaling, storage expansion, and in-place Helm adoption are outside its
-current scope. See [tested versions and results](docs/evaluation.md),
+current scope. All spec fields except version are creation-time settings.
+See [input formats and recovery steps](docs/usage.md), [tested versions and results](docs/evaluation.md),
 [scope](docs/scope.md), and [maintenance limits](docs/operations.md).
 
 ## Try it in Kind
@@ -48,7 +49,7 @@ Prerequisites are Docker, Kind v0.33.0, Helm 3, kubectl, Python 3, OpenSSL, Just
 ```sh
 just up
 export KUBECONFIG="$PWD/.state/kubeconfig"
-kubectl --context kind-nats-operator-dev -n nats-demo get natsclusters,pods,pvc
+kubectl --context kind-nats-operator-dev -n nats-demo get natsclusters.nats.gravqc.github.io,pods,pvc
 just evaluate
 just status
 just logs
@@ -94,8 +95,8 @@ From the checkout, run:
 export NATS_TOKEN="nats_$(openssl rand -hex 24)"
 kubectl -n messaging create secret generic nats-auth --from-literal=token="$NATS_TOKEN"
 kubectl -n messaging apply -f examples/ha.yaml
-kubectl -n messaging wait natscluster/platform --for=condition=Ready --timeout=240s
-kubectl -n messaging get natscluster/platform
+kubectl -n messaging wait natsclusters.nats.gravqc.github.io/platform --for=condition=Ready --timeout=240s
+kubectl -n messaging get natsclusters.nats.gravqc.github.io/platform
 ```
 
 The last command should show `True` in the `READY` column and the in-cluster NATS URL. Connect

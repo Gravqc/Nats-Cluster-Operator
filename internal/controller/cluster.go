@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,26 @@ import (
 
 const finalizer = "nats.gravqc.github.io/retain-workloads"
 
+// Leave room in NATS's 4096-byte CONNECT argument for JSON and other client fields.
+const maxTokenBytes = 3072
+const maxControlLineBytes = 4096
+
+// Older clusters may already use longer tokens. Keep them if the token fits
+// in a minimal CONNECT, with additional client fields left to the client.
+func legacyTokenFits(token []byte) bool {
+	if len(token) >= maxControlLineBytes {
+		return false
+	}
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(map[string]string{"auth_token": string(token)}); err != nil {
+		return false
+	}
+	// NATS measures the JSON argument alone. Exclude Encoder's trailing LF.
+	return encoded.Len()-1 <= maxControlLineBytes
+}
+
 var (
 	tokenText         = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_+./=-]*$`)
 	tokenNumberSuffix = regexp.MustCompile(`(?i)^[kmgtpe][bi]*$`)
@@ -41,7 +62,7 @@ var (
 // NATS parses an environment variable as configuration syntax. Restrict the
 // token to unquoted text that the parser passes through unchanged.
 func validToken(token []byte) bool {
-	if !tokenText.Match(token) {
+	if len(token) > maxTokenBytes || !tokenText.Match(token) {
 		return false
 	}
 	value := string(token)
@@ -92,6 +113,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		}
 	}
 	spec := object.Spec
+	if !natsVersion.MatchString(spec.Version) {
+		return ctrl.Result{}, r.status(ctx, object, false, "InvalidVersion", "Set a canonical 2.x.y server version with at most nine digits per component")
+	}
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: object.GetNamespace(), Name: spec.CredentialsSecret}, secret)
 	if err != nil {
@@ -102,6 +126,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	}
 	if len(secret.Data["token"]) == 0 {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "CredentialsMissing", "Credentials Secret requires a nonempty token key")
+	}
+	if token := secret.Data["token"]; len(token) > maxTokenBytes &&
+		(object.Status.AppliedVersion == "" || !legacyTokenFits(token)) {
+		if object.Status.AppliedVersion != "" {
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "CredentialsInvalid", "The legacy token cannot fit in a NATS CONNECT line")
+		}
+		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "CredentialsInvalid", fmt.Sprintf("The token must be at most %d bytes", maxTokenBytes))
 	}
 	// Previously healthy clusters already passed startup with their credentials.
 	// Keep those credentials grandfathered while rotation remains unsupported.
@@ -121,7 +152,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 		oldImage := existing.Spec.Template.Spec.Containers[0].Image
 		newImage := "nats:" + spec.Version + "-alpine"
 		if oldImage != newImage && object.Status.UpgradeVersion == "" {
-			if !forwardUpgrade(strings.TrimSuffix(strings.TrimPrefix(oldImage, "nats:"), "-alpine"), spec.Version) {
+			from, hasPrefix := strings.CutPrefix(oldImage, "nats:")
+			from, hasSuffix := strings.CutSuffix(from, "-alpine")
+			legacyRepair := metav1.IsControlledBy(existing, object) && sameLegacyVersion(from, spec.Version)
+			if oversizedLegacyImage(oldImage) && metav1.IsControlledBy(existing, object) && object.Status.AppliedVersion == "" {
+				pod, blocked, err := r.legacyPullFailure(ctx, existing, newImage)
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				// A scaled-down fixture has no broker to replace. Otherwise
+				// wait for a confirmed pull failure before changing the template.
+				legacyRepair = !blocked && (pod != nil || (existing.Spec.Replicas != nil &&
+					*existing.Spec.Replicas == 0 && existing.Status.Replicas == 0))
+			}
+			if !hasPrefix || !hasSuffix || (!(natsVersion.MatchString(from) && forwardUpgrade(from, spec.Version)) && !legacyRepair) {
 				return ctrl.Result{RequeueAfter: 15 * time.Second}, r.status(ctx, object, false, "UnsupportedUpgrade", "The running StatefulSet must upgrade forward by at most one server minor")
 			}
 			object.Status.UpgradeVersion = spec.Version
@@ -142,6 +186,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.
 	statefulSet := &appsv1.StatefulSet{}
 	if err = r.Get(ctx, request.NamespacedName, statefulSet); err != nil {
 		return ctrl.Result{}, err
+	}
+	if object.Status.AppliedVersion == "" && object.Status.UpgradeVersion != "" &&
+		metav1.IsControlledBy(statefulSet, object) &&
+		statefulSet.Spec.Template.Spec.Containers[0].Image == "nats:"+spec.Version+"-alpine" {
+		pod, blocked, err := r.legacyPullFailure(ctx, statefulSet, "nats:"+spec.Version+"-alpine")
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if blocked {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, r.status(ctx, object, false, "HealthGateBlocked", "Waiting for safe recovery of the legacy broker image")
+		}
+		if pod != nil {
+			object.Status.HealthySince = nil
+			object.Status.LastRestartedPod = pod.Name
+			if err := r.status(ctx, object, false, "RecoveringLegacyImage", "Replacing a broker that could not pull its legacy image"); err != nil {
+				return ctrl.Result{}, err
+			}
+			err = r.Delete(ctx, pod, client.Preconditions{UID: &pod.UID, ResourceVersion: &pod.ResourceVersion})
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, client.IgnoreNotFound(err)
+		}
 	}
 	healthy, reason := r.observe(ctx, object)
 	if !healthy {
