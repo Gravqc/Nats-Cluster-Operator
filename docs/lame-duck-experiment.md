@@ -105,17 +105,9 @@ What remains true, and was not measured:
   duration would shorten that and concentrate reconnections. That is a
   trade-off for the maintainer, not a defect.
 
-Reproduce from a fresh lab after `just up`. Switch the controller to the
-baseline build first. The probe jobs still use the current quickstart image.
+Reproduce from a fresh lab after `just up`:
 
 ```sh
-git archive ee10389 Dockerfile go.mod go.sum api cmd internal |
-  docker build -t nats-cluster-operator:transition-baseline -
-kind load docker-image nats-cluster-operator:transition-baseline --name nats-operator-dev
-export KUBECONFIG="$PWD/.state/kubeconfig"
-kubectl --context kind-nats-operator-dev -n nats-demo set image deployment/nats-operator \
-  operator=nats-cluster-operator:transition-baseline
-kubectl --context kind-nats-operator-dev -n nats-demo rollout status deployment/nats-operator --timeout=180s
 python3 tests/lameduck.py baseline
 ```
 
@@ -211,8 +203,8 @@ Verified counts include the 100 seed messages.
 All five conditions held. B's rollout took 42% of A's time. Every restart
 exited cleanly. No connection stayed disconnected and every payload verified.
 The publisher's longest gap was 0.38s against a limit of 1.27s. The p99
-reconnect time was 1ms against a limit of 1s. **B is adopted**, and the
-operator now writes these two settings into every cluster's configuration.
+reconnect time was 1ms against a limit of 1s. Those results led to the
+initial adoption of B in the local branch.
 
 The expected cost showed up as a burstier reconnect rate: 60 per second
 against 13. At 1,000 clients on one host, that had no measured effect on
@@ -220,14 +212,14 @@ reconnect latency or on the publisher. The test did not cover much larger
 client counts, servers under heavy load or clients with authentication
 callouts. A separate run below tested the transition for existing clusters.
 
-Reproduce each arm on its own fresh lab after `just up`. Switch the
-controller to the baseline build as shown above for arm A. Use the quickstart
-controller for arm B.
+Use a fresh lab for each arm. The current build runs arm A:
 
 ```sh
-python3 tests/lameduck_tradeoff.py A   # on a build without the settings
-python3 tests/lameduck_tradeoff.py B   # on the current build
+python3 tests/lameduck_tradeoff.py A
 ```
+
+For arm B, run `just up` in a checkout of the historical commit `07eb813`
+with its own fresh lab, then run `python3 tests/lameduck_tradeoff.py B`.
 
 ### Trade-off rerun — 2026-11-28
 
@@ -248,7 +240,8 @@ three clean 24-second exits and all clients reconnected. The maximum
 acknowledgement gap was 0.71 seconds, with zero retries and all 25,857 seed and
 acknowledged payloads verified. This repeat met the timing thresholds against
 the same baseline. The two short-drain runs give mixed evidence on the
-publisher gap.
+publisher gap. The operator reverted to inherited server timing before
+publication.
 
 ## Existing-cluster transition — 2026-11-28
 
@@ -264,3 +257,18 @@ broker with 300 clients exited cleanly in 24 seconds. The first client closed
 after 11.9 seconds and all 300 closed. The publisher acknowledged 3,456
 messages during the test with zero retries. Verification found every seed and
 acknowledged payload after the rollout and subsequent restart.
+
+## Rollback verification — 2026-11-28
+
+A separate R3 cluster started on NATS 2.15.2 with the experimental 30-second
+settings. Rolling back only the controller removed those settings from the
+ConfigMap, preserved all three broker UIDs, and left all 100 seed payloads
+readable. During the subsequent guarded upgrade to 2.15.3, each original
+broker drained 300 clients and exited cleanly in 23 seconds using its
+startup configuration. A subsequent restart of one replacement broker
+drained 300 clients and exited cleanly in 78 seconds using the inherited
+timing. All 2,570 seed and acknowledged payloads verified through both steps.
+
+In three additional shutdown trials on a newly created cluster, all 300
+clients closed and the broker exited cleanly in 78–80 seconds. These runs
+used the same 120-second Kubernetes termination period.

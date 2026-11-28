@@ -154,7 +154,7 @@ with the chart's 10-second grace and 30-second duration. The shorter setting
 cut the rollout from 283 to 119 seconds, and each restart from about 80 to 24
 seconds. Peak reconnects rose from 13 to 60 per second, with no client left
 disconnected, no publisher retries, and every payload verified. It met the
-pre-registered rule, so the operator now sets these values. See
+pre-registered rule, so the local branch initially set these values. See
 [lame-duck-experiment.md](lame-duck-experiment.md#results--2026-11-24-adopted).
 With the settings in place, all nine e2e checks, `tests/memory.py` and
 `tests/upgrade_comparison.py` passed on a fresh lab the same day (1,600 of
@@ -181,4 +181,26 @@ original threshold.
 The [1,000-client drain rerun](lame-duck-experiment.md#trade-off-rerun--2026-11-28)
 confirmed shorter rollouts, clean exits and intact payloads. The shorter
 drain exceeded the publisher-gap threshold in one run and met it in an
-isolated repeat.
+isolated repeat. The release candidate restores inherited server timing.
+
+## Rollback validation — 2026-11-28
+
+The restored controller matched the controller code at `ee10389`. Go race
+tests, vet, CRD regeneration, Helm lint, Python unit tests and Ruff passed.
+
+The [rollback trial](lame-duck-experiment.md#rollback-verification--2026-11-28)
+verified 2,570 payloads through a controller rollback, an R3 patch upgrade,
+and a subsequent broker restart. Three fresh-cluster shutdown trials exited
+cleanly in 78–80 seconds. A standalone patch upgrade replaced the broker
+and verified all 100 seeds on the retained volume.
+
+The first lifecycle run encountered a Service dial timeout during seeding.
+A new probe reached the same Service, and all nine lifecycle checks passed
+on a fresh-namespace retry. The memory check passed. Both pinned minor-upgrade
+arms confirmed process replacement and verified 1,600 payloads each.
+
+The lag comparison observed 20 Ready-but-lagging samples where the operator
+blocked on stream health, with zero restarts during the gated window. Both
+arms verified all acknowledged payloads. Helm's 2.67-second acknowledgement
+gap was below the 5-second threshold, so the comparative result was
+inconclusive.

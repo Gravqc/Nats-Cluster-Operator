@@ -4,9 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	natsv1 "github.com/Gravqc/Nats-Cluster-Operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -182,26 +182,23 @@ func TestStandaloneConfigDoesNotWaitForClusterRoutes(t *testing.T) {
 	}
 }
 
-func TestLameDuckShutdownFitsTerminationGrace(t *testing.T) {
+func TestLameDuckUsesServerDefaults(t *testing.T) {
 	for _, replicas := range []int32{1, 3} {
 		cluster := fixture("ldm")
 		cluster.Spec.Replicas = replicas
 		objects := Resources(cluster, cluster.Spec)
 		config := objects[0].(*corev1.ConfigMap).Data["nats.conf"]
-		if !strings.Contains(config, "lame_duck_grace_period: \"10s\"\n") || !strings.Contains(config, "lame_duck_duration: \"30s\"\n") {
-			t.Fatalf("lame-duck timing must be explicit for %d servers:\n%s", replicas, config)
+		if strings.Contains(config, "lame_duck_") {
+			t.Fatalf("expected NATS to supply the drain timing for %d servers", replicas)
 		}
 		pod := objects[3].(*appsv1.StatefulSet).Spec.Template.Spec
-		if lifecycle := pod.Containers[0].Lifecycle; lifecycle == nil || lifecycle.PreStop == nil {
-			t.Fatal("preStop must enter lame-duck mode")
+		lifecycle := pod.Containers[0].Lifecycle
+		if lifecycle == nil || lifecycle.PreStop == nil || lifecycle.PreStop.Exec == nil ||
+			!slices.Equal(lifecycle.PreStop.Exec.Command, []string{"nats-server", "--signal", "ldm=1"}) {
+			t.Fatalf("preStop must enter lame-duck mode for %d servers", replicas)
 		}
-		// SIGTERM is ignored during lame-duck mode; only SIGKILL ends it early.
-		needed := lameDuckGrace + lameDuckDuration + shutdownOverhead
-		if time.Duration(*pod.TerminationGracePeriodSeconds)*time.Second < needed {
-			t.Fatalf("termination grace %ds is shorter than %s", *pod.TerminationGracePeriodSeconds, needed)
-		}
-		if lameDuckGrace >= lameDuckDuration || lameDuckDuration < 30*time.Second {
-			t.Fatal("NATS rejects this lame-duck configuration")
+		if pod.TerminationGracePeriodSeconds == nil || *pod.TerminationGracePeriodSeconds != 120 {
+			t.Fatalf("expected a 120-second termination period for %d servers", replicas)
 		}
 	}
 }
